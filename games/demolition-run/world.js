@@ -34,8 +34,9 @@ export const SEGMENT_LENGTH = 40;
 export const DRAW_DISTANCE = 300; // ~8 segments visible ahead
 export const STREET_HALF_WIDTH = 6; // must match car.js's STREET_HALF_WIDTH exactly
 
-// Segments are recycled once their far/trailing edge has scrolled behind
-// this Z threshold (a bit behind the car, for margin before despawn).
+// Segments are recycled once their far edge (the one still facing the
+// camera, at Z = -7) has scrolled behind this threshold — a margin behind
+// the camera so recycling happens only once the segment is fully offscreen.
 const RECYCLE_BEHIND_Z = -20;
 
 const BUILDING_COLORS = [0x33394a, 0x3d3626, 0x2f4038, 0x402f3a];
@@ -248,9 +249,13 @@ export function updateWorld(world, dt, carSpeed) {
       if (record.state !== "despawned") updatePropTransform(world.pool, record);
     }
 
-    // Trailing edge = baseZ - SEGMENT_LENGTH/2 (the far/back edge of this
-    // segment as it scrolls toward the camera/car).
-    const trailingEdge = slot.baseZ - SEGMENT_LENGTH / 2;
+    // The camera sits behind the car looking toward +Z, and everything
+    // scrolls toward -Z, so the edge that stays in view LONGEST is the one
+    // with the larger Z (baseZ + SEGMENT_LENGTH/2) — only once that edge
+    // has scrolled behind the camera is the whole segment actually
+    // offscreen. Using the smaller-Z edge here would recycle a segment
+    // while its far half is still clearly visible.
+    const trailingEdge = slot.baseZ + SEGMENT_LENGTH / 2;
     if (trailingEdge < RECYCLE_BEHIND_Z) {
       const newIndex = world.nextSegmentIndex++;
       const newBaseZ = slot.baseZ + world.segments.length * SEGMENT_LENGTH;
