@@ -1,0 +1,49 @@
+.game-main {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  padding-top: calc(72px + var(--space-4));
+}
+
+.new-game-btn {
+  flex: none;
+}
+
+.board {
+  width: min(92vw, 92vh, 420px);
+  aspect-ratio: 1 / 1;
+  background: var(--bg-1);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  touch-action: none;
+}
+
+.grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: clamp(16px, 6vw, 32px);
+  transition: transform 0.1s ease, background-color 0.1s ease, color 0.1s ease;
+}
+
+.cell.filled {
+  transform: scale(1);
+}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Flappy Tap</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="game-page">
+  <canvas id="game"></canvas>
+
+  <header class="hud safe-area">
+    <a class="hud-back" href="../../index.html">&larr; Games</a>
+    <div class="hud-scores">
+      <div class="hud-score">
+        <span class="label">Score</span>
+        <span class="value" id="score-value">0</span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Best</span>
+        <span class="value" id="best-value">0</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="overlay" id="gameover-overlay" hidden>
+    <h2>Game Over</h2>
+    <p class="stat">Score <strong id="final-score">0</strong></p>
+    <p class="stat">Best <strong id="final-best">0</strong></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="retry-btn">Retry</button>
+    </div>
+  </section>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

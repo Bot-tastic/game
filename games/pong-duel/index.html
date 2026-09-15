@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>Pong Duel</title>
+<link rel="stylesheet" href="../../shared/theme.css" />
+<link rel="stylesheet" href="../../shared/components.css" />
+<link rel="stylesheet" href="../../shared/multiplayer/join-ui.css" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body class="game-page">
+  <canvas id="game"></canvas>
+
+  <div class="hud safe-area">
+    <a class="hud-back" href="../../index.html">&larr; Games</a>
+    <div class="hud-scores">
+      <div class="hud-score">
+        <span class="label">You</span>
+        <span class="value" id="score-you">0</span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Opp</span>
+        <span class="value" id="score-opp">0</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="menu-overlay">
+    <h1>Pong Duel</h1>
+    <div id="join-container"></div>
+  </div>
+
+  <div class="overlay mp-opponent-left" id="left-overlay" hidden>
+    <h2>Opponent disconnected</h2>
+    <p>Your opponent has left the match.</p>
+    <div class="actions">
+      <button class="btn btn--primary" id="left-back-btn">Back to Menu</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="result-overlay" hidden>
+    <h1 id="result-title">You Win!</h1>
+    <p class="stat" id="result-stat"></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="result-back-btn">Back to Menu</button>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
