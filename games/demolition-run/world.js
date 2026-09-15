@@ -39,6 +39,12 @@ export const STREET_HALF_WIDTH = 6; // must match car.js's STREET_HALF_WIDTH exa
 // the camera so recycling happens only once the segment is fully offscreen.
 const RECYCLE_BEHIND_Z = -20;
 
+// Extra grace period (seconds) a segment waits *after* crossing
+// RECYCLE_BEHIND_Z before it's actually recycled — a cushion so a segment
+// never gets pulled away right at the edge of visibility, in case the fog
+// distance, FOV, or camera framing lets a sliver of it peek back into view.
+const RECYCLE_DELAY_SECONDS = 3;
+
 const BUILDING_COLORS = [0x33394a, 0x3d3626, 0x2f4038, 0x402f3a];
 
 // Number of segment slots kept in the active pool. Enough to cover the draw
@@ -82,7 +88,7 @@ function buildSegmentMeshes(scene) {
   group.add(road, sidewalkL, sidewalkR, buildingL, buildingR);
   scene.add(group);
 
-  return { group, road, sidewalkL, sidewalkR, buildingL, buildingR };
+  return { group, road, sidewalkL, sidewalkR, buildingL, buildingR, offscreenTimer: 0 };
 }
 
 // Roll the per-segment spawn table deterministically off `rng`, capping the
@@ -150,6 +156,7 @@ function generateSegment(slot, segmentIndex, baseZ, pool, liveProps) {
   slot.segmentIndex = segmentIndex;
   slot.baseZ = baseZ;
   slot.group.position.z = baseZ;
+  slot.offscreenTimer = 0;
 
   // Despawn this slot's previous props (if recycling). A record Pass 2's
   // physics.js already despawned early (state "despawned") has had its
@@ -228,10 +235,14 @@ export function resetWorld(world) {
 }
 
 /**
- * Scroll every segment (and its props) by carSpeed*dt toward -Z, recycling
- * any segment whose trailing edge has scrolled past RECYCLE_BEHIND_Z by
- * moving it back to the front of the active window and re-rolling its
- * layout via the seeded PRNG.
+ * Scroll every segment (and its props) by carSpeed*dt toward -Z. A segment
+ * whose trailing edge has scrolled past RECYCLE_BEHIND_Z is left in place
+ * (already invisible) for a further RECYCLE_DELAY_SECONDS before it's
+ * actually recycled — moved back to the front of the active window and
+ * re-rolled via the seeded PRNG. All segments share one uniform scroll
+ * speed and stay exactly SEGMENT_LENGTH apart forever, so the pool remains
+ * one contiguous strip regardless of how long any single slot's recycle is
+ * delayed — delaying it never opens a gap ahead of the camera.
  */
 export function updateWorld(world, dt, carSpeed) {
   const dz = carSpeed * dt;
@@ -257,6 +268,11 @@ export function updateWorld(world, dt, carSpeed) {
     // while its far half is still clearly visible.
     const trailingEdge = slot.baseZ + SEGMENT_LENGTH / 2;
     if (trailingEdge < RECYCLE_BEHIND_Z) {
+      slot.offscreenTimer += dt;
+    } else {
+      slot.offscreenTimer = 0;
+    }
+    if (slot.offscreenTimer >= RECYCLE_DELAY_SECONDS) {
       const newIndex = world.nextSegmentIndex++;
       const newBaseZ = slot.baseZ + world.segments.length * SEGMENT_LENGTH;
       generateSegment(slot, newIndex, newBaseZ, world.pool, world.liveProps);
