@@ -91,60 +91,79 @@ function buildSegmentMeshes(scene) {
   return { group, road, sidewalkL, sidewalkR, buildingL, buildingR, offscreenTimer: 0 };
 }
 
+// The car's steering clamp (car.js: STREET_HALF_WIDTH - CAR_HALF_WIDTH)
+// tops out at x = 5.1, so every roadside prop band below stays within
+// [ROADSIDE_MIN, ROADSIDE_MAX] — comfortably reachable with full steering,
+// rather than out past where the car can ever actually reach.
+const ROADSIDE_MIN = 3.2;
+const ROADSIDE_MAX = 5.0;
+
 // Roll the per-segment spawn table deterministically off `rng`, capping the
-// total number of spawned props at 4 (fixed priority order on overflow).
+// total number of spawned props at MAX_PROPS_PER_SEGMENT (fixed priority
+// order on overflow). Pool capacity is 60 instances per type (props.js);
+// at up to ~4 ragdolls/~2 cones-or-trashcans/1 sign/1 parkedcar per segment
+// across NUM_SEGMENTS_IN_POOL (~11) active segments, no single type comes
+// close to that cap.
+const MAX_PROPS_PER_SEGMENT = 7;
+
 function rollSpawnPlan(rng, segmentIndex) {
   const plan = [];
 
-  // 60%: 1 lamppost per side, x = ±4.3
-  if (rng() < 0.6) {
-    plan.push({ typeId: "lamppost", x: -4.3, rot: 0 });
-    plan.push({ typeId: "lamppost", x: 4.3, rot: 0 });
+  // 70%: 1 lamppost per side, right at the road edge
+  if (rng() < 0.7) {
+    plan.push({ typeId: "lamppost", x: -3.4, rot: 0 });
+    plan.push({ typeId: "lamppost", x: 3.4, rot: 0 });
   }
-  // 35%: 1 parked car in shoulder band (|x| in [4.5, 6]), either side
-  if (rng() < 0.35) {
+  // 45%: 1 parked car in the roadside band, either side
+  if (rng() < 0.45) {
     const side = rng() < 0.5 ? -1 : 1;
-    const x = side * (4.5 + rng() * 1.5);
+    const x = side * (ROADSIDE_MIN + rng() * (ROADSIDE_MAX - ROADSIDE_MIN));
     const rot = (rng() - 0.5) * 0.3;
     plan.push({ typeId: "parkedcar", x, rot });
   }
-  // 25%: cluster of 1-3 cones/trashcans near the shoulder
-  if (rng() < 0.25) {
-    const count = 1 + Math.floor(rng() * 3);
+  // 50%: cluster of 2-4 cones/trashcans along the roadside
+  if (rng() < 0.5) {
+    const count = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < count; i++) {
       const side = rng() < 0.5 ? -1 : 1;
-      const x = side * (4.6 + rng() * 1.2);
+      const x = side * (ROADSIDE_MIN + rng() * (ROADSIDE_MAX - ROADSIDE_MIN));
       const typeId = rng() < 0.5 ? "cone" : "trashcan";
       plan.push({ typeId, x, rot: 0 });
     }
   }
-  // 15%: 1 sign/mailbox
-  if (rng() < 0.15) {
-    const side = rng() < 0.5 ? -1 : 1;
-    plan.push({ typeId: "sign", x: side * 4.3, rot: 0 });
-  }
-  // 20%: 1-2 ragdoll pedestrians near the sidewalk edge
-  if (rng() < 0.2) {
-    const count = 1 + (rng() < 0.5 ? 1 : 0);
+  // 35%: 1-2 signs/mailboxes
+  if (rng() < 0.35) {
+    const count = 1 + (rng() < 0.4 ? 1 : 0);
     for (let i = 0; i < count; i++) {
       const side = rng() < 0.5 ? -1 : 1;
-      const x = side * (6.5 + rng() * 1.5);
+      plan.push({ typeId: "sign", x: side * (ROADSIDE_MIN + rng() * 0.6), rot: 0 });
+    }
+  }
+  // 45%: 1-3 ragdoll pedestrians, within the same reachable roadside band
+  // (previously placed at |x| 6.5-8, entirely beyond the car's max reach
+  // of 5.1 — nobody could ever hit one; fixed to sit in-range).
+  if (rng() < 0.45) {
+    const count = 1 + Math.floor(rng() * 3);
+    for (let i = 0; i < count; i++) {
+      const side = rng() < 0.5 ? -1 : 1;
+      const x = side * (ROADSIDE_MIN + rng() * (ROADSIDE_MAX - ROADSIDE_MIN));
       plan.push({ typeId: "ragdoll", x, rot: rng() * Math.PI * 2 });
     }
   }
-  // every 6th segment (deterministic): 1 barrier in the shoulder band,
-  // sometimes overlapping into the drivable edge
-  if (segmentIndex % 6 === 0) {
+  // every 4th segment (deterministic): 1 barrier, often overlapping into
+  // the drivable edge so it reads as a real hazard, not just scenery
+  if (segmentIndex % 4 === 0) {
     const side = rng() < 0.5 ? -1 : 1;
-    const x = side * (5 + rng() * 1.5);
+    const x = side * (2.8 + rng() * 1.6);
     plan.push({ typeId: "barrier", x, rot: 0 });
   }
 
-  // Fixed priority order on overflow: keep the first 4 in this priority.
+  // Fixed priority order on overflow: keep the first MAX_PROPS_PER_SEGMENT
+  // in this priority.
   const priority = ["barrier", "parkedcar", "lamppost", "ragdoll", "sign", "cone", "trashcan"];
   plan.sort((a, b) => priority.indexOf(a.typeId) - priority.indexOf(b.typeId));
 
-  return plan.slice(0, 4);
+  return plan.slice(0, MAX_PROPS_PER_SEGMENT);
 }
 
 /** (Re)generate a segment slot's building look and props for `segmentIndex`,
