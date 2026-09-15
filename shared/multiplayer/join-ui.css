@@ -1,0 +1,66 @@
+.mp-join {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 320px;
+}
+
+.mp-join__choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.mp-join__host,
+.mp-join__guest {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.mp-join__code {
+  appearance: none;
+  border: 2px dashed var(--accent);
+  background: var(--bg-1);
+  color: var(--accent);
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  min-height: var(--touch-target-min);
+}
+
+.mp-join__input {
+  appearance: none;
+  border: 2px solid var(--bg-2);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  width: 100%;
+  min-height: var(--touch-target-min);
+}
+
+.mp-join__status {
+  font-size: 14px;
+  color: var(--fg-1);
+  min-height: 1.2em;
+}
+
+.mp-opponent-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}

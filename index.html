@@ -2,28 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Game Hub</title>
+  <link rel="stylesheet" href="shared/theme.css" />
+  <link rel="stylesheet" href="shared/components.css" />
   <style>
-    body {
-      margin: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      font-family: system-ui, sans-serif;
-      background: #111;
-      color: #eee;
-    }
-    main {
+    header.safe-area {
       text-align: center;
+      padding: var(--space-6) var(--space-4) var(--space-4);
+    }
+
+    header.safe-area p {
+      margin-top: var(--space-2);
+      font-size: 14px;
     }
   </style>
 </head>
 <body>
-  <main>
-    <h1>game</h1>
-    <p>Coming soon.</p>
+  <header class="safe-area">
+    <h1>Game Hub</h1>
+    <p>Quick, tappable games. Pick one and play.</p>
+  </header>
+  <main class="card-grid safe-area">
+    <a class="game-card" href="games/stack-tower/index.html">
+      <span class="badge badge--sp">1P</span>
+      <div class="icon">🧱</div>
+      <h2>Stack Tower</h2>
+      <p>Tap to stack blocks as high as you can.</p>
+    </a>
+    <a class="game-card" href="games/2048/index.html">
+      <span class="badge badge--sp">1P</span>
+      <div class="icon">🔢</div>
+      <h2>2048</h2>
+      <p>Swipe to merge tiles up to 2048.</p>
+    </a>
+    <a class="game-card" href="games/flappy-tap/index.html">
+      <span class="badge badge--sp">1P</span>
+      <div class="icon">🐦</div>
+      <h2>Flappy Tap</h2>
+      <p>One tap to fly through the gaps.</p>
+    </a>
+    <a class="game-card" href="games/slice/index.html">
+      <span class="badge badge--sp">1P</span>
+      <div class="icon">🍉</div>
+      <h2>Slice</h2>
+      <p>Swipe to slice fruit, dodge the bombs.</p>
+    </a>
+    <a class="game-card" href="games/color-dodge/index.html">
+      <span class="badge badge--sp">1P</span>
+      <div class="icon">🎨</div>
+      <h2>Color Dodge</h2>
+      <p>Tap to match colors, don't hit the wrong gate.</p>
+    </a>
+    <a class="game-card" href="games/pong-duel/index.html">
+      <span class="badge badge--mp">2P</span>
+      <div class="icon">🏓</div>
+      <h2>Pong Duel</h2>
+      <p>Real-time 1v1 pong. Share a code to play.</p>
+    </a>
+    <a class="game-card" href="games/connect-four-duel/index.html">
+      <span class="badge badge--mp">2P</span>
+      <div class="icon">🔴</div>
+      <h2>Connect Four Duel</h2>
+      <p>Classic 4-in-a-row. Share a code to play.</p>
+    </a>
   </main>
 </body>
 </html>

@@ -1,0 +1,74 @@
+#game-area {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  padding-top: calc(var(--space-6) + env(safe-area-inset-top, 0px));
+}
+
+.turn-indicator {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--fg-0);
+  background: var(--bg-1);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+#board {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  width: min(96vw, 480px);
+  aspect-ratio: 7 / 6;
+  touch-action: none;
+}
+
+.column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.column.column--disabled {
+  cursor: default;
+}
+
+.cell {
+  flex: 1;
+  border-radius: 50%;
+  background: var(--bg-0);
+  position: relative;
+  overflow: hidden;
+}
+
+.cell .disc {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  transform: scale(0.4);
+  opacity: 0;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.cell.filled .disc {
+  transform: scale(1);
+  opacity: 1;
+}
+
+.disc--p1 {
+  background: var(--accent-2);
+}
+
+.disc--p2 {
+  background: var(--warn);
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Slice</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="game-page">
+  <canvas id="game"></canvas>
+
+  <div class="hud safe-area">
+    <a class="hud-back" href="../../index.html">← Games</a>
+    <div class="hud-scores">
+      <div class="hud-score">
+        <span class="label">Score</span>
+        <span class="value" id="score-value">0</span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Best</span>
+        <span class="value" id="best-value">0</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="menu-overlay">
+    <h1>Slice</h1>
+    <p>Swipe across the fruit to slice it. Chain slices in one swipe for<br />combo bonus points. Avoid the bombs — one hit ends the run.</p>
+    <div class="actions">
+      <button class="btn btn--primary" id="start-btn">Start</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="gameover-overlay" hidden>
+    <h1>Sliced!</h1>
+    <p class="stat">Score: <strong id="final-score">0</strong></p>
+    <p class="stat">Best: <strong id="final-best">0</strong></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="retry-btn">Retry</button>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

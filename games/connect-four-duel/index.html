@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Connect Four Duel</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="../../shared/multiplayer/join-ui.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="game-page">
+  <header class="hud safe-area">
+    <a class="hud-back" href="../../index.html">&larr; Games</a>
+    <div class="hud-scores">
+      <div class="hud-score">
+        <span class="label" id="you-label">You</span>
+        <span class="value" id="you-color">-</span>
+      </div>
+      <div class="hud-score">
+        <span class="label" id="opp-label">Opp</span>
+        <span class="value" id="opp-color">-</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="game-area">
+    <p id="turn-indicator" class="turn-indicator" hidden></p>
+    <div id="board"></div>
+  </main>
+
+  <!-- MENU overlay -->
+  <div class="overlay" id="menu-overlay">
+    <h1>Connect Four Duel</h1>
+    <p>Head-to-head, drop discs, connect four to win.</p>
+    <div id="join-container"></div>
+  </div>
+
+  <!-- Opponent left overlay -->
+  <div class="overlay mp-opponent-left" id="opponent-left-overlay" hidden>
+    <h2>Opponent disconnected</h2>
+    <p>Your opponent has left the game.</p>
+    <div class="actions">
+      <button class="btn btn--primary" id="opponent-left-back">Back to Menu</button>
+    </div>
+  </div>
+
+  <!-- Win / draw overlay -->
+  <div class="overlay" id="result-overlay" hidden>
+    <h2 id="result-message">Game Over</h2>
+    <div class="actions">
+      <button class="btn btn--primary" id="result-back">Back to Menu</button>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
