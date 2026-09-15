@@ -42,7 +42,7 @@ const CAM_X_FOLLOW = 0.6;
 const CAM_HEIGHT = 4.5;
 const CAM_POS_DAMPING = 6;
 const LOOKAHEAD = 10;
-const CAM_BASE_Z = 7; // camera sits behind car's fixed z=0, looking toward -Z
+const CAM_BASE_Z = -7; // camera sits behind car's fixed z=0, looking toward +Z (where world.js spawns/scrolls the street)
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -169,5 +169,5 @@ export function updateCamera(camera, car, dt) {
   camera.position.x += (desiredX - camera.position.x) * Math.min(1, CAM_POS_DAMPING * dt);
   camera.position.y = car.y + CAM_HEIGHT;
   camera.position.z = CAM_BASE_Z;
-  camera.lookAt(camera.position.x * 0.5, car.y + 1, -LOOKAHEAD);
+  camera.lookAt(camera.position.x * 0.5, car.y + 1, LOOKAHEAD);
 }
