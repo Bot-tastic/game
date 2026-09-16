@@ -47,25 +47,27 @@ const MAX_GAP_WIDTH = 135; // world units; keeps real reaction-time margin under
 const MIN_GAP_WIDTH = 60;
 
 export const LEVEL_DEFS = [
-  { id: 1, name: "First Steps", difficulty: "Easy", seed: 101, length: 9200, speed: 260, color: "#4fd1c5", density: 0.18, gapChance: 0.15, modePlan: [{ mode: "cube", at: 0 }] },
-  { id: 2, name: "Sky Cruiser", difficulty: "Easy", seed: 202, length: 10500, speed: 280, color: "#5b8cff", density: 0.22, gapChance: 0.18, tunnelMin: 90, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.4 }, { mode: "cube", at: 0.75 }] },
-  { id: 3, name: "Block Party", difficulty: "Normal", seed: 303, length: 11500, speed: 300, color: "#ffb347", density: 0.32, gapChance: 0.2, modePlan: [{ mode: "cube", at: 0 }] },
-  { id: 4, name: "Turbulence", difficulty: "Normal", seed: 404, length: 12800, speed: 320, color: "#7a5cff", density: 0.34, gapChance: 0.22, tunnelMin: 80, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.3 }, { mode: "cube", at: 0.6 }, { mode: "ship", at: 0.85 }] },
-  { id: 5, name: "Iron Legs", difficulty: "Hard", seed: 505, length: 13500, speed: 340, color: "#ff5d73", density: 0.4, gapChance: 0.24, modePlan: [{ mode: "robot", at: 0 }] },
-  { id: 6, name: "Hover Zone", difficulty: "Hard", seed: 606, length: 14200, speed: 360, color: "#3fd68a", density: 0.42, gapChance: 0.26, modePlan: [{ mode: "ufo", at: 0 }] },
-  { id: 7, name: "Quad Shift", difficulty: "Hard", seed: 707, length: 15500, speed: 380, color: "#ffd23f", density: 0.44, gapChance: 0.26, tunnelMin: 75, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.2 }, { mode: "robot", at: 0.45 }, { mode: "ufo", at: 0.7 }, { mode: "cube", at: 0.9 }] },
-  { id: 8, name: "Spike Storm", difficulty: "Harder", seed: 808, length: 17000, speed: 420, color: "#ff7a1a", density: 0.52, gapChance: 0.28, tunnelMin: 70, modePlan: [{ mode: "cube", at: 0 }, { mode: "robot", at: 0.25 }, { mode: "ship", at: 0.5 }, { mode: "ufo", at: 0.75 }] },
-  { id: 9, name: "Chaos Theory", difficulty: "Insane", seed: 909, length: 19500, speed: 460, color: "#ff3fa4", density: 0.6, gapChance: 0.3, tunnelMin: 65, modePlan: [{ mode: "cube", at: 0 }, { mode: "ufo", at: 0.15 }, { mode: "ship", at: 0.35 }, { mode: "robot", at: 0.55 }, { mode: "ship", at: 0.75 }, { mode: "cube", at: 0.9 }] },
+  { id: 1, name: "First Steps", difficulty: "Easy", seed: 101, length: 9200, speed: 260, color: "#4fd1c5", density: 0.3, gapChance: 0.2, modePlan: [{ mode: "cube", at: 0 }] },
+  { id: 2, name: "Sky Cruiser", difficulty: "Easy", seed: 202, length: 10500, speed: 280, color: "#5b8cff", density: 0.34, gapChance: 0.22, tunnelMin: 90, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.4 }, { mode: "cube", at: 0.75 }] },
+  { id: 3, name: "Block Party", difficulty: "Normal", seed: 303, length: 11500, speed: 300, color: "#ffb347", density: 0.44, gapChance: 0.25, modePlan: [{ mode: "cube", at: 0 }] },
+  { id: 4, name: "Turbulence", difficulty: "Normal", seed: 404, length: 12800, speed: 320, color: "#7a5cff", density: 0.46, gapChance: 0.26, tunnelMin: 80, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.3 }, { mode: "cube", at: 0.6 }, { mode: "ship", at: 0.85 }] },
+  { id: 5, name: "Iron Legs", difficulty: "Hard", seed: 505, length: 13500, speed: 340, color: "#ff5d73", density: 0.52, gapChance: 0.28, modePlan: [{ mode: "robot", at: 0 }] },
+  { id: 6, name: "Hover Zone", difficulty: "Hard", seed: 606, length: 14200, speed: 360, color: "#3fd68a", density: 0.46, gapChance: 0.28, modePlan: [{ mode: "ufo", at: 0 }] },
+  { id: 7, name: "Quad Shift", difficulty: "Hard", seed: 707, length: 15500, speed: 380, color: "#ffd23f", density: 0.56, gapChance: 0.3, tunnelMin: 75, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.2 }, { mode: "robot", at: 0.45 }, { mode: "ufo", at: 0.7 }, { mode: "cube", at: 0.9 }] },
+  { id: 8, name: "Spike Storm", difficulty: "Harder", seed: 808, length: 17000, speed: 420, color: "#ff7a1a", density: 0.64, gapChance: 0.32, tunnelMin: 70, modePlan: [{ mode: "cube", at: 0 }, { mode: "robot", at: 0.25 }, { mode: "ship", at: 0.5 }, { mode: "ufo", at: 0.75 }] },
+  { id: 9, name: "Chaos Theory", difficulty: "Insane", seed: 909, length: 19500, speed: 460, color: "#ff3fa4", density: 0.72, gapChance: 0.34, tunnelMin: 65, modePlan: [{ mode: "cube", at: 0 }, { mode: "ufo", at: 0.15 }, { mode: "ship", at: 0.35 }, { mode: "robot", at: 0.55 }, { mode: "ship", at: 0.75 }, { mode: "cube", at: 0.9 }] },
   { id: 10, name: "Demon Core", difficulty: "Demon", seed: 1010, length: 22000, speed: 520, color: "#ff2d4d", density: 0.7, gapChance: 0.32, tunnelMin: 60, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.15 }, { mode: "robot", at: 0.3 }, { mode: "ufo", at: 0.45 }, { mode: "ship", at: 0.6 }, { mode: "cube", at: 0.72 }, { mode: "robot", at: 0.85 }] },
 ];
 
 function generateGroundSegment(rng, seg, def, groundSegments, hazards) {
   let cursor = seg.start;
-  const reactionTime = lerp(1.6, 0.8, def.density); // seconds of flat runway between features
+  // Tighter than a first pass: real Geometry Dash rarely gives more than a
+  // beat of flat runway between obstacles, even on easy levels.
+  const reactionTime = lerp(1.1, 0.5, def.density);
   const marginEnd = 220;
 
   while (cursor < seg.end - marginEnd) {
-    const flatLen = Math.round(def.speed * (reactionTime + rng() * 0.6));
+    const flatLen = Math.round(def.speed * (reactionTime + rng() * 0.35));
     const flatEnd = Math.min(cursor + flatLen, seg.end - marginEnd);
     groundSegments.push({ x0: cursor, x1: flatEnd, floorY: GROUND_Y });
     cursor = flatEnd;
@@ -94,14 +96,15 @@ function generateGroundSegment(rng, seg, def, groundSegments, hazards) {
       hazards.push({ x0: cursor + 2, x1: cursor + 28, y0: GROUND_Y - 46, y1: GROUND_Y });
       cursor += 30;
     } else {
-      groundSegments.push({ x0: cursor, x1: cursor + 44, floorY: GROUND_Y });
-      const maxRow = 1 + Math.floor(def.density * 3);
-      const rowCount = 1 + Math.floor(rng() * Math.min(3, maxRow));
+      const maxRow = 1 + Math.floor(def.density * 4);
+      const rowCount = 1 + Math.floor(rng() * Math.min(4, maxRow));
+      const rowWidth = (rowCount - 1) * 30 + 44; // must cover every hazard in the row, not just the first
+      groundSegments.push({ x0: cursor, x1: cursor + rowWidth, floorY: GROUND_Y });
       for (let k = 0; k < rowCount; k++) {
         const sx = cursor + k * 30;
         hazards.push({ x0: sx, x1: sx + 26, y0: GROUND_Y - 30, y1: GROUND_Y });
       }
-      cursor += 44;
+      cursor += rowWidth;
     }
   }
 

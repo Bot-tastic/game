@@ -1,6 +1,6 @@
 // main.js — boot/orchestration for Geo Dash.
 import { lockViewport, onPointer, loadHighScore, saveHighScore, createLoop, fitCanvasToScreen } from "../../shared/game-utils.js";
-import { LEVEL_DEFS, generateLevel, modeAt, bestScoreKey, WORLD_HEIGHT, GROUND_Y, GROUND_MODES } from "./levels.js";
+import { LEVEL_DEFS, generateLevel, modeAt, bestScoreKey, WORLD_HEIGHT, GROUND_Y } from "./levels.js";
 import { createPlayer, updatePlayer, hitsHazard, snapToMode, HITBOX } from "./player.js";
 
 const canvas = document.getElementById("game");
@@ -237,9 +237,20 @@ function drawGround() {
 
   for (const seg of currentLevel.groundSegments) {
     if (seg.x1 < viewLeft || seg.x0 > viewRight) continue;
-    if (seg.floorY == null) continue; // pit, nothing to draw
     const sx0 = worldToScreenX(seg.x0);
     const sx1 = worldToScreenX(seg.x1);
+
+    if (seg.floorY == null) {
+      // Pit — must be clearly visible as a hazard, never rendered as
+      // "nothing" (that reads as solid, invisible ground to a player).
+      ctx.fillStyle = "#05060a";
+      ctx.fillRect(sx0, worldToScreenY(GROUND_Y), sx1 - sx0, height - worldToScreenY(GROUND_Y));
+      ctx.fillStyle = "#ff3b3b";
+      ctx.fillRect(sx0, worldToScreenY(GROUND_Y), 4, height - worldToScreenY(GROUND_Y));
+      ctx.fillRect(sx1 - 4, worldToScreenY(GROUND_Y), 4, height - worldToScreenY(GROUND_Y));
+      continue;
+    }
+
     const sy = worldToScreenY(seg.floorY);
     ctx.fillStyle = currentLevelDef.color;
     ctx.fillRect(sx0, sy, sx1 - sx0, height - sy);
