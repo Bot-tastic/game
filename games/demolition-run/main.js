@@ -64,10 +64,10 @@ renderer.shadowMap.enabled = false;
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 260);
 
-const hemiLight = new THREE.HemisphereLight(0x8899aa, 0x11141a, 1.1);
+const hemiLight = new THREE.HemisphereLight(0xaab8ff, 0x2a2320, 1.25);
 scene.add(hemiLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+const dirLight = new THREE.DirectionalLight(0xfff2d9, 0.95);
 dirLight.position.set(-15, 30, 20);
 dirLight.castShadow = false;
 scene.add(dirLight);

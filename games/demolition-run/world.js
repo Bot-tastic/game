@@ -45,7 +45,9 @@ const RECYCLE_BEHIND_Z = -20;
 // distance, FOV, or camera framing lets a sliver of it peek back into view.
 const RECYCLE_DELAY_SECONDS = 3;
 
-const BUILDING_COLORS = [0x33394a, 0x3d3626, 0x2f4038, 0x402f3a];
+const BUILDING_COLORS = [
+  0x4a3f6b, 0x1f6b5c, 0x6b2f4a, 0x2f4f8a, 0x8a5a2f, 0x2f6b8a, 0x6b5a2f, 0x4a2f6b,
+];
 
 // Number of segment slots kept in the active pool. Enough to cover the draw
 // distance ahead plus a couple behind for recycle margin.
@@ -63,9 +65,9 @@ function mulberry32(seed) {
 }
 
 function buildSegmentMeshes(scene) {
-  const roadMat = new THREE.MeshLambertMaterial({ color: 0x2a2d35, flatShading: true });
-  const sidewalkMat = new THREE.MeshLambertMaterial({ color: 0x3a3d47, flatShading: true });
-  const buildingMat = new THREE.MeshLambertMaterial({ color: 0x33394a, flatShading: true });
+  const roadMat = new THREE.MeshLambertMaterial({ color: 0x33373f, flatShading: true });
+  const sidewalkMat = new THREE.MeshLambertMaterial({ color: 0x4a4536, flatShading: true });
+  const buildingMat = new THREE.MeshLambertMaterial({ color: BUILDING_COLORS[0], flatShading: true });
 
   const roadGeo = new THREE.BoxGeometry(STREET_HALF_WIDTH * 2, 0.2, SEGMENT_LENGTH);
   const road = new THREE.Mesh(roadGeo, roadMat);
@@ -100,29 +102,30 @@ const ROADSIDE_MAX = 5.0;
 
 // Roll the per-segment spawn table deterministically off `rng`, capping the
 // total number of spawned props at MAX_PROPS_PER_SEGMENT (fixed priority
-// order on overflow). Pool capacity is 60 instances per type (props.js);
-// at up to ~4 ragdolls/~2 cones-or-trashcans/1 sign/1 parkedcar per segment
-// across NUM_SEGMENTS_IN_POOL (~11) active segments, no single type comes
-// close to that cap.
-const MAX_PROPS_PER_SEGMENT = 7;
+// order on overflow). Pool capacity is 60 instances per type (props.js).
+// Worst case with the probabilities below (every roll succeeding, every
+// count maxed) across NUM_SEGMENTS_IN_POOL (~11) active segments: lamppost
+// 22, parkedcar 11, cone/trashcan up to 44 combined, sign 22, ragdoll 33,
+// barrier ~6 — all comfortably under the 60-per-type cap.
+const MAX_PROPS_PER_SEGMENT = 10;
 
 function rollSpawnPlan(rng, segmentIndex) {
   const plan = [];
 
-  // 70%: 1 lamppost per side, right at the road edge
-  if (rng() < 0.7) {
+  // 80%: 1 lamppost per side, right at the road edge
+  if (rng() < 0.8) {
     plan.push({ typeId: "lamppost", x: -3.4, rot: 0 });
     plan.push({ typeId: "lamppost", x: 3.4, rot: 0 });
   }
-  // 45%: 1 parked car in the roadside band, either side
-  if (rng() < 0.45) {
+  // 60%: 1 parked car in the roadside band, either side
+  if (rng() < 0.6) {
     const side = rng() < 0.5 ? -1 : 1;
     const x = side * (ROADSIDE_MIN + rng() * (ROADSIDE_MAX - ROADSIDE_MIN));
     const rot = (rng() - 0.5) * 0.3;
     plan.push({ typeId: "parkedcar", x, rot });
   }
-  // 50%: cluster of 2-4 cones/trashcans along the roadside
-  if (rng() < 0.5) {
+  // 70%: cluster of 2-4 cones/trashcans along the roadside
+  if (rng() < 0.7) {
     const count = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < count; i++) {
       const side = rng() < 0.5 ? -1 : 1;
@@ -131,18 +134,18 @@ function rollSpawnPlan(rng, segmentIndex) {
       plan.push({ typeId, x, rot: 0 });
     }
   }
-  // 35%: 1-2 signs/mailboxes
-  if (rng() < 0.35) {
+  // 50%: 1-2 signs/mailboxes
+  if (rng() < 0.5) {
     const count = 1 + (rng() < 0.4 ? 1 : 0);
     for (let i = 0; i < count; i++) {
       const side = rng() < 0.5 ? -1 : 1;
       plan.push({ typeId: "sign", x: side * (ROADSIDE_MIN + rng() * 0.6), rot: 0 });
     }
   }
-  // 45%: 1-3 ragdoll pedestrians, within the same reachable roadside band
+  // 60%: 1-3 ragdoll pedestrians, within the same reachable roadside band
   // (previously placed at |x| 6.5-8, entirely beyond the car's max reach
   // of 5.1 — nobody could ever hit one; fixed to sit in-range).
-  if (rng() < 0.45) {
+  if (rng() < 0.6) {
     const count = 1 + Math.floor(rng() * 3);
     for (let i = 0; i < count; i++) {
       const side = rng() < 0.5 ? -1 : 1;
@@ -150,9 +153,9 @@ function rollSpawnPlan(rng, segmentIndex) {
       plan.push({ typeId: "ragdoll", x, rot: rng() * Math.PI * 2 });
     }
   }
-  // every 4th segment (deterministic): 1 barrier, often overlapping into
+  // every 3rd segment (deterministic): 1 barrier, often overlapping into
   // the drivable edge so it reads as a real hazard, not just scenery
-  if (segmentIndex % 4 === 0) {
+  if (segmentIndex % 3 === 0) {
     const side = rng() < 0.5 ? -1 : 1;
     const x = side * (2.8 + rng() * 1.6);
     plan.push({ typeId: "barrier", x, rot: 0 });

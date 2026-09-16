@@ -32,13 +32,22 @@ const POOL_CAPACITY = 60;
 // Static per-type facts. halfWidth/halfDepth are approximate AABB half-extents.
 // damageCausing/basePoints are static facts about the type per the spec.
 const PROP_DEFS = {
-  lamppost: { halfWidth: 0.15, halfDepth: 0.15, damageCausing: false, basePoints: 60, color: 0x22252c },
-  sign: { halfWidth: 0.35, halfDepth: 0.1, damageCausing: false, basePoints: 40, color: 0xffb020 },
-  cone: { halfWidth: 0.3, halfDepth: 0.3, damageCausing: false, basePoints: 25, color: 0xff7a1a },
-  trashcan: { halfWidth: 0.35, halfDepth: 0.35, damageCausing: false, basePoints: 30, color: 0x3a4a3a },
+  lamppost: { halfWidth: 0.15, halfDepth: 0.15, damageCausing: false, basePoints: 60, color: 0xffe94f },
+  sign: { halfWidth: 0.35, halfDepth: 0.1, damageCausing: false, basePoints: 40, color: 0xff9d1f },
+  cone: { halfWidth: 0.3, halfDepth: 0.3, damageCausing: false, basePoints: 25, color: 0xff5a1f },
+  trashcan: { halfWidth: 0.35, halfDepth: 0.35, damageCausing: false, basePoints: 30, color: 0x37d3a3 },
   ragdoll: { halfWidth: 0.3, halfDepth: 0.3, damageCausing: false, basePoints: 75, color: 0xd9a689 },
-  parkedcar: { halfWidth: 1.0, halfDepth: 2.0, damageCausing: true, basePoints: 150, color: 0x5a6472 },
-  barrier: { halfWidth: 2.0, halfDepth: 0.4, damageCausing: true, basePoints: 90, color: 0xffb020 },
+  parkedcar: { halfWidth: 1.0, halfDepth: 2.0, damageCausing: true, basePoints: 150, color: 0xd63b5c },
+  barrier: { halfWidth: 2.0, halfDepth: 0.4, damageCausing: true, basePoints: 90, color: 0xffce1f },
+};
+
+// Per-instance color variety for the two prop types the eye lingers on most
+// (parked cars line the street constantly; ragdolls are the most numerous
+// "characters"). Applied via InstancedMesh.setColorAt on spawn; every other
+// type keeps its single PROP_DEFS.color for simplicity/perf.
+const COLOR_VARIANT_TYPES = {
+  parkedcar: [0xd63b5c, 0x3b8fd6, 0xf5c518, 0x3bd67a, 0xf5822a, 0x9d5cf5, 0x3bd6cf],
+  ragdoll: [0xd9a689, 0xf5c9a0, 0x8a5a3a, 0xe8b4d9, 0x8ac9f5, 0xf5e08a],
 };
 
 function buildGeometry(typeId) {
@@ -106,9 +115,21 @@ export function createPropsPool(scene) {
   for (const typeId of Object.keys(PROP_DEFS)) {
     const def = PROP_DEFS[typeId];
     const geometry = buildGeometry(typeId);
-    const material = new THREE.MeshLambertMaterial({ color: def.color, flatShading: true });
+    const hasColorVariants = !!COLOR_VARIANT_TYPES[typeId];
+    const material = new THREE.MeshLambertMaterial({
+      color: def.color,
+      flatShading: true,
+      vertexColors: hasColorVariants,
+    });
     const mesh = new THREE.InstancedMesh(geometry, material, POOL_CAPACITY);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (hasColorVariants) {
+      // Pre-fill every instance slot with the base color so unspawned
+      // instances (parked far away) still have a valid color attribute.
+      const c = new THREE.Color(def.color);
+      for (let i = 0; i < POOL_CAPACITY; i++) mesh.setColorAt(i, c);
+      mesh.instanceColor.needsUpdate = true;
+    }
 
     // Park every instance far away/invisible until spawned.
     const m = new THREE.Matrix4();
@@ -131,6 +152,7 @@ const _matrix = new THREE.Matrix4();
 const _quatIdentity = new THREE.Quaternion();
 const _scaleOne = new THREE.Vector3(1, 1, 1);
 const _pos = new THREE.Vector3();
+const _colorScratch = new THREE.Color();
 
 /**
  * Spawn a prop of `typeId` at world (x, z). Finds a free instance slot,
@@ -156,6 +178,13 @@ export function spawnProp(pool, typeId, x, z, rotationY = 0) {
   _matrix.compose(_pos, quat, _scaleOne);
   mesh.setMatrixAt(instanceIndex, _matrix);
   mesh.instanceMatrix.needsUpdate = true;
+
+  const variants = COLOR_VARIANT_TYPES[typeId];
+  if (variants) {
+    const hex = variants[Math.floor(Math.random() * variants.length)];
+    mesh.setColorAt(instanceIndex, _colorScratch.setHex(hex));
+    mesh.instanceColor.needsUpdate = true;
+  }
 
   return {
     typeId,
