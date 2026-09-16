@@ -62,11 +62,11 @@ const CAR_HALF_DEPTH = 1.6; // half the visual car's length along Z
 const Z_CHECK_WINDOW = 3; // cheap early-out: only look at props within this |z|
 
 const CAR_FORWARD_BIAS = 0.6;
-const BASE_LAUNCH_SPEED = 14;
-const SPIN_MAX = 6;
+const BASE_LAUNCH_SPEED = 22;
+const SPIN_MAX = 11;
 const GRAVITY = 18;
-const BOUNCE_DAMPING = 0.3;
-const SETTLE_DESPAWN_DELAY = 1.5;
+const BOUNCE_DAMPING = 0.45;
+const SETTLE_DESPAWN_DELAY = 2.2;
 
 const MAX_SPEED = 40; // must match car.js's MAX_SPEED
 
@@ -74,7 +74,7 @@ export const DAMAGE_COOLDOWN = 1.0; // seconds of invulnerability after a damagi
 export const DAMAGE_AMOUNTS = { parkedcar: 18, barrier: 22 };
 export const PARKEDCAR_DAMAGE_SPEED_THRESHOLD = 0.5 * MAX_SPEED; // 20
 
-const NO_BOUNCE_TYPES = new Set(["lamppost", "sign", "ragdoll"]);
+const NO_BOUNCE_TYPES = new Set(["ragdoll"]);
 const TOPPLE_TYPES = new Set(["lamppost", "sign"]);
 
 const PARKEDCAR_SLIDE_DURATION = 0.4;
@@ -147,7 +147,7 @@ function launchProp(prop, car) {
 
   prop.velocity.x = dx * launchSpeed;
   prop.velocity.z = dz * launchSpeed;
-  prop.velocity.y = 4 + Math.random() * 3;
+  prop.velocity.y = 6 + Math.random() * 5;
 
   if (prop.typeId === "parkedcar") {
     prop.angularVelocity.x = 0;
