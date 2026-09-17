@@ -6,13 +6,13 @@
 // Design note on fairness: the player's gun always autofires at whatever
 // wave is in range (no aiming skill involved), so a wave is beatable exactly
 // when its total HP fits inside deliverable damage during its firing
-// window. generateLevel() runs a "reference" legion through the exact same
-// gate sequence the real run will see (gates are deterministic and apply to
-// legion count/fire rate/damage only — never to fairness margins the
-// player can't affect) and sizes each wave's HP against that reference's
-// DPS at that point, with a fixed safety margin. This means every level is
-// guaranteed completable by construction, independent of anything except
-// the deterministic gate sequence itself.
+// window. Gates now come in pairs (steer left or right to choose one of two
+// operations), so the player has real agency over which op they take —
+// generateLevel() accounts for this by running a "reference" legion through
+// the WORSE of each pair (whichever leaves it with lower resulting DPS) and
+// sizing each wave's HP against that worst-case reference's DPS at that
+// point, with a fixed safety margin. This means every level is guaranteed
+// completable no matter which side of every gate the player picks.
 
 export const LANE_HALF_WIDTH = 3;
 export const PLAYER_X_CLAMP = 2.6;
@@ -25,9 +25,9 @@ export const MIN_FIRE_RATE = 0.5;
 export const MIN_DAMAGE = 1;
 
 // Fraction of the theoretical max damage-in-window a wave's HP is sized to.
-// Kept well under 1 so dt-step integration error and level-generation edge
-// cases never produce an unfair wave.
-const TARGET_FRACTION = 0.55;
+// Close to 1 makes every wave a real threat; kept just under it so dt-step
+// integration error never produces a mathematically-unfair wave.
+const TARGET_FRACTION = 0.88;
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -104,20 +104,20 @@ function rollGateOp(rng, difficulty) {
       label = `÷${value}`;
       break;
     case "fireRateAdd":
-      value = 1.25;
-      label = "RATE+";
+      value = 1.2 + Math.floor(rng() * 3) * 0.1; // 1.2 - 1.4
+      label = `RATE ×${value.toFixed(1)}`;
       break;
     case "fireRateSub":
-      value = 0.8;
-      label = "RATE-";
+      value = 0.6 + Math.floor(rng() * 3) * 0.1; // 0.6 - 0.8
+      label = `RATE ×${value.toFixed(1)}`;
       break;
     case "damageAdd":
-      value = 1.25;
-      label = "DMG+";
+      value = 1.2 + Math.floor(rng() * 3) * 0.1;
+      label = `DMG ×${value.toFixed(1)}`;
       break;
     case "damageSub":
-      value = 0.8;
-      label = "DMG-";
+      value = 0.6 + Math.floor(rng() * 3) * 0.1;
+      label = `DMG ×${value.toFixed(1)}`;
       break;
   }
   return { kind, value, label };
@@ -153,10 +153,45 @@ export function applyGateOp(state, op) {
   }
 }
 
+function dpsOf(state) {
+  return state.count * state.fireRate * state.damage;
+}
+
+// Update the fairness reference for a choice gate using a per-dimension
+// worst-case LOWER BOUND rather than "whichever side's total dps is lower":
+// a gate always changes exactly one of {count, fireRate, damage} (whichever
+// dimension a chosen op's kind targets), so for each dimension separately,
+// the worst possible outcome is the smaller of "this side's effect on that
+// dimension" and "the other side's effect on that dimension" (which is a
+// no-op if that side targets a different dimension). Taking this min
+// independently per dimension — rather than assuming one single consistent
+// choice minimizes total dps — stays a valid lower bound on real dps no
+// matter which side the player actually picks at every gate in the level,
+// because actual dps is always >= the product of each dimension's own
+// worst-case-so-far value.
+function worstCaseGateUpdate(ref, left, right) {
+  for (const dim of ["count", "fireRate", "damage"]) {
+    const tempLeft = { ...ref };
+    applyGateOp(tempLeft, left);
+    const tempRight = { ...ref };
+    applyGateOp(tempRight, right);
+    ref[dim] = Math.min(tempLeft[dim], tempRight[dim]);
+  }
+}
+
+/** Roll two distinct-kind ops for a choice gate; returns {left, right}. */
+function rollGatePair(rng, difficulty) {
+  const left = rollGateOp(rng, difficulty);
+  let right = rollGateOp(rng, difficulty);
+  let guard = 0;
+  while (right.kind === left.kind && guard++ < 8) right = rollGateOp(rng, difficulty);
+  return { left, right };
+}
+
 /**
  * Build the full event list for a level def. Returns { ...def, events }
  * where events is a z-ascending array of:
- *   { type: "gate", z, op: {kind,value,label} }
+ *   { type: "gate", z, left: {kind,value,label}, right: {kind,value,label} }
  *   { type: "wave", z, hp, maxHp, cols, rows, penalty }
  */
 export function generateLevel(def) {
@@ -167,22 +202,23 @@ export function generateLevel(def) {
   const window = RANGE / def.speed;
 
   const marginEnd = def.speed * 2.5;
-  let cursor = def.speed * 4; // breathing room before the first event
+  let cursor = def.speed * 3.5; // breathing room before the first event
   let lastType = null;
 
   while (cursor < def.length - marginEnd) {
     // Never two waves back to back (each needs its full window clear); a
-    // gate can follow anything, including another gate.
-    const placeWave = lastType !== "wave" && rng() < 0.5;
+    // gate can follow anything, including another gate. Weighted toward
+    // waves compared to the original pass — this is meant to feel dense.
+    const placeWave = lastType !== "wave" && rng() < 0.62;
 
     if (!placeWave) {
-      const op = rollGateOp(rng, def.difficulty);
-      applyGateOp(ref, op);
-      events.push({ type: "gate", z: cursor, op });
+      const { left, right } = rollGatePair(rng, def.difficulty);
+      worstCaseGateUpdate(ref, left, right);
+      events.push({ type: "gate", z: cursor, left, right });
       lastType = "gate";
-      cursor += def.speed * (1.6 + rng() * 1.4);
+      cursor += def.speed * (1.3 + rng() * 1.0);
     } else {
-      const dps = ref.count * ref.fireRate * ref.damage;
+      const dps = dpsOf(ref);
       const cols = 1 + Math.floor(rng() * 4);
       const rows = 1 + Math.floor(rng() * Math.min(3, 1 + def.difficulty * 2));
       const count = cols * rows;
@@ -191,7 +227,7 @@ export function generateLevel(def) {
       const penalty = Math.min(3, 1 + Math.floor(count / 5));
       events.push({ type: "wave", z: cursor, hp: targetHp, maxHp: targetHp, hpEach, cols, rows, count, penalty, cleared: false, resolved: false });
       lastType = "wave";
-      cursor += Math.max(def.speed * window + def.speed * 0.8, def.speed * (2.2 + rng() * 1.6));
+      cursor += Math.max(def.speed * window + def.speed * 0.5, def.speed * (1.8 + rng() * 1.2));
     }
   }
 

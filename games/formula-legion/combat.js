@@ -31,7 +31,8 @@ export function stepRun(run, dt) {
     if (ev.type === "gate") {
       if (!ev.applied && ev.z <= run.playerZ) {
         ev.applied = true;
-        applyGateOp(run.legion, ev.op);
+        ev.chosen = run.legion.x < 0 ? "left" : "right";
+        applyGateOp(run.legion, ev[ev.chosen]);
       }
       continue;
     }
