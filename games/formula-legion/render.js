@@ -63,17 +63,33 @@ export function createLevelVisuals(scene, level) {
 
   for (const ev of level.events) {
     if (ev.type === "gate") {
-      const color = GATE_COLORS[ev.op.kind] || 0xffffff;
-      const mat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.55, flatShading: true });
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(LANE_HALF_WIDTH * 2, 3.2, 0.4), mat);
-      mesh.position.set(0, 1.6, ev.z);
-      group.add(mesh);
+      const halfW = LANE_HALF_WIDTH;
+      const gateGroup = new THREE.Group();
+      gateGroup.position.set(0, 0, ev.z);
 
-      const label = makeLabelSprite(ev.op.label, color);
-      label.position.set(0, 3.2, ev.z);
-      group.add(label);
+      // Left half [-halfW, 0] and right half [0, halfW], each its own panel
+      // + label, plus a thin bright divider down the middle so the split
+      // reads as an actual fork the player has to steer into.
+      for (const side of [-1, 1]) {
+        const op = side < 0 ? ev.left : ev.right;
+        const color = GATE_COLORS[op.kind] || 0xffffff;
+        const mat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.6, flatShading: true });
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(halfW - 0.08, 3.2, 0.4), mat);
+        panel.position.set(side * halfW * 0.5, 1.6, 0);
+        gateGroup.add(panel);
 
-      ev._mesh = mesh;
+        const label = makeLabelSprite(op.label, color);
+        label.position.set(side * halfW * 0.5, 3.4, 0);
+        gateGroup.add(label);
+      }
+
+      const dividerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const divider = new THREE.Mesh(new THREE.BoxGeometry(0.08, 3.6, 0.5), dividerMat);
+      divider.position.set(0, 1.8, 0);
+      gateGroup.add(divider);
+
+      group.add(gateGroup);
+      ev._mesh = gateGroup;
     } else {
       const waveGroup = new THREE.Group();
       waveGroup.position.set(0, 0, ev.z);
@@ -141,6 +157,14 @@ export function createLegionCrowd(scene) {
   const heads = new THREE.InstancedMesh(headGeo, mat, LEGION_CAP);
   bodies.count = 0;
   heads.count = 0;
+  // Instances are positioned via per-instance matrices far from this mesh's
+  // own local origin (at world Z = playerZ, which grows into the hundreds+
+  // over a level) — three.js only frustum-culls using the geometry's own
+  // untransformed bounding sphere at that local origin, so without this the
+  // whole crowd gets silently culled the moment playerZ moves any distance
+  // from 0, even though every instance is right in front of the camera.
+  bodies.frustumCulled = false;
+  heads.frustumCulled = false;
   scene.add(bodies, heads);
 
   const dummy = new THREE.Object3D();
@@ -172,10 +196,12 @@ export function updateLegionCrowd(crowd, legion, playerZ) {
   crowd.heads.instanceMatrix.needsUpdate = true;
 }
 
-/** Damped third-person chase camera following the legion. */
+/** Damped third-person chase camera following the legion, framed low and
+ * close so the crowd itself reads clearly in the lower half of the screen
+ * (rather than a distant top-down view where it's a tiny speck). */
 export function updateCamera(camera, legion, playerZ, dt) {
-  const targetPos = new THREE.Vector3(legion.x * 0.6, 6.5, playerZ - 8.5);
+  const targetPos = new THREE.Vector3(legion.x * 0.6, 3.4, playerZ - 5.5);
   const damping = Math.min(1, 6 * dt);
   camera.position.lerp(targetPos, damping);
-  camera.lookAt(legion.x, 1.2, playerZ + RANGE * 0.6);
+  camera.lookAt(legion.x, 0.9, playerZ + RANGE * 0.4);
 }
