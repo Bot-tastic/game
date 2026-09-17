@@ -171,10 +171,11 @@
   font-weight: 900;
   font-style: italic;
   letter-spacing: 0.06em;
-  color: #fff;
+  color: var(--dr-amber);
   opacity: 0;
   pointer-events: none;
-  text-shadow: 0 0 22px var(--dr-amber), 0 0 60px rgba(255, 176, 32, 0.8);
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.55);
+  text-shadow: 0 0 14px rgba(255, 176, 32, 0.85), 0 0 34px rgba(255, 110, 20, 0.45), 0 4px 0 rgba(60, 20, 0, 0.55);
 }
 
 .rampage.on {
@@ -213,7 +214,7 @@ body.rampaging .vignette {
   font-style: italic;
   color: #fff;
   white-space: nowrap;
-  text-shadow: 0 0 12px rgba(94, 230, 200, 0.8), 0 2px 4px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 0 12px rgba(94, 230, 200, 0.8), 0 2px 5px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.9);
   animation: pop-rise 0.85s ease-out forwards;
 }
 
@@ -388,9 +389,9 @@ body.rampaging .vignette {
 /* ---- overlays ---- */
 .overlay {
   background:
-    radial-gradient(ellipse 90% 60% at 50% 12%, rgba(255, 47, 109, 0.22), transparent 70%),
-    radial-gradient(ellipse 80% 50% at 50% 100%, rgba(94, 230, 200, 0.14), transparent 70%),
-    rgba(7, 8, 13, 0.93);
+    radial-gradient(ellipse 90% 55% at 50% 8%, rgba(255, 47, 109, 0.3), transparent 72%),
+    radial-gradient(ellipse 70% 40% at 50% 104%, rgba(94, 230, 200, 0.07), transparent 72%),
+    rgba(7, 8, 13, 0.62);
   z-index: 20;
 }
 
@@ -403,7 +404,8 @@ body.rampaging .vignette {
   padding: var(--space-5) var(--space-4);
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(24, 26, 36, 0.8), rgba(11, 13, 18, 0.82));
+  background: linear-gradient(180deg, rgba(22, 24, 34, 0.9), rgba(10, 12, 17, 0.93));
+  backdrop-filter: blur(6px);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
 }
 
@@ -421,11 +423,12 @@ body.rampaging .vignette {
 }
 
 .title {
-  font-size: clamp(38px, 13vw, 58px);
+  font-size: clamp(30px, 10.2vw, 52px);
   font-weight: 900;
   font-style: italic;
-  line-height: 0.88;
-  letter-spacing: -0.045em;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  max-width: 100%;
   text-align: center;
   text-transform: uppercase;
   background: linear-gradient(180deg, #fff 30%, #ffb9cd 60%, var(--dr-hot) 100%);

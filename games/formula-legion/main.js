@@ -50,6 +50,13 @@ import { createFx, spawnTracer, spawnFlash, spawnSparks, spawnNumber, updateFx }
 import * as audio from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
+
+/** Compact big numbers so a seven-figure legion still reads at a glance. */
+function fmt(n) {
+  if (n < 10000) return String(Math.round(n));
+  if (n < 1e6) return (n / 1e3).toFixed(n < 1e5 ? 1 : 0) + "K";
+  return (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + "M";
+}
 const canvas = $("game");
 const menuOverlay = $("menu-overlay");
 const perkOverlay = $("perk-overlay");
@@ -77,12 +84,15 @@ const PEAK_KEY = "game-tastic:formula-legion:peak";
 const QUALITY_KEY = "game-tastic:formula-legion:bloom";
 
 let best = loadHighScore(BEST_KEY, 0);
-let deepest = loadHighScore(DEPTH_KEY, 1);
+let deepest = Math.max(1, loadHighScore(DEPTH_KEY, 1));
 let peakBest = loadHighScore(PEAK_KEY, 0);
-let bloomOn = loadHighScore(QUALITY_KEY, canAffordBloom() ? 1 : 0) === 1;
+// 0 means "never chosen" (a missing key reads back as 0), 1 = lite, 2 = high,
+// so the device check still decides the first time the game is opened.
+const storedQuality = loadHighScore(QUALITY_KEY, 0);
+let bloomOn = storedQuality === 0 ? canAffordBloom() : storedQuality === 2;
 
-bestValueEl.textContent = String(best);
-$("menu-best").textContent = String(best);
+bestValueEl.textContent = fmt(best);
+$("menu-best").textContent = fmt(best);
 $("menu-depth").textContent = String(deepest);
 qualityBtn.textContent = `Effects: ${bloomOn ? "High" : "Lite"}`;
 
@@ -140,7 +150,7 @@ const _v = new THREE.Vector3();
 function loadLevel(index) {
   disposeObject(scene, track && track.group);
   disposeObject(scene, props && props.root);
-  level = generateLevel(getLevelDef(index));
+  level = generateLevel(getLevelDef(index), legion);
   run = createRun(level, legion);
   track = createTrack(scene, level);
   props = createLevelProps(scene, level);
@@ -187,7 +197,7 @@ function keyboardSteer(dt) {
 // ---- HUD ----
 function updateHud(force) {
   if (force || legion.count !== lastCount) {
-    countValueEl.textContent = String(legion.count);
+    countValueEl.textContent = fmt(legion.count);
     if (!prefersReducedMotion() && !force) {
       const cls = legion.count > lastCount ? "bump" : "drop";
       armyCountEl.classList.remove("bump", "drop");
@@ -196,7 +206,7 @@ function updateHud(force) {
     }
     lastCount = legion.count;
   }
-  scoreValueEl.textContent = String(run ? run.score : 0);
+  scoreValueEl.textContent = fmt(run ? run.score : 0);
   tierBadgeEl.textContent = `MK${legion.tier} ${TIER_NAMES[legion.tier - 1]}`;
   const tc = "#" + teamColor(legion).toString(16).padStart(6, "0");
   tierBadgeEl.style.borderColor = tc;
@@ -209,7 +219,7 @@ function updateHud(force) {
   if (wall && wall.z - playerZ < WARN_DISTANCE) {
     const hp = wall.colHp.reduce((s, h) => s + h, 0);
     warnBanner.hidden = false;
-    warnSub.textContent = `${wall.boss ? "BOSS " : ""}HP ${Math.ceil(hp)} · ${wall.cols} COLUMN${
+    warnSub.textContent = `${wall.boss ? "BOSS " : ""}HP ${fmt(hp)} · ${wall.cols} COLUMN${
       wall.cols > 1 ? "S" : ""
     }`;
   } else {
@@ -256,7 +266,7 @@ function handleRunEvents() {
             legion.x,
             2.4,
             playerZ + 2,
-            (e.delta > 0 ? "+" : "") + e.delta,
+            (e.delta > 0 ? "+" : "-") + fmt(Math.abs(e.delta)),
             e.delta > 0 ? "#3ddc84" : "#ff4d6d",
             Math.abs(e.delta) > 40
           );
@@ -291,7 +301,7 @@ function handleRunEvents() {
         spawnSparks(fx, e.x, 1, playerZ, 18, 0xff4d6d, 1.2);
         break;
       case "lost":
-        spawnNumber(fx, legion.x, 2.6, playerZ + 1.5, `-${e.n}`, "#ff4d6d", e.n > 30);
+        spawnNumber(fx, legion.x, 2.6, playerZ + 1.5, `-${fmt(e.n)}`, "#ff4d6d", e.n > 30);
         break;
       case "shield":
         audio.shield();
@@ -314,7 +324,7 @@ function showPerks() {
   state = "perk";
   audio.fanfare();
   $("perk-level").textContent = String(level.id);
-  $("perk-summary").textContent = `Score ${run.score} · Legion ${legion.count} · MK${legion.tier}`;
+  $("perk-summary").textContent = `Score ${fmt(run.score)} · Legion ${fmt(legion.count)} · MK${legion.tier}`;
   perkGrid.innerHTML = "";
   for (const perk of rollPerks(levelIndex, legion.perks)) {
     const btn = document.createElement("button");
@@ -350,12 +360,12 @@ function triggerGameOver() {
   saveHighScore(BEST_KEY, best);
   peakBest = Math.max(peakBest, peakCount);
   saveHighScore(PEAK_KEY, peakBest);
-  bestValueEl.textContent = String(best);
-  $("menu-best").textContent = String(best);
+  bestValueEl.textContent = fmt(best);
+  $("menu-best").textContent = fmt(best);
   $("final-level").textContent = String(level.id);
-  $("final-score").textContent = String(run.score);
-  $("final-best").textContent = String(best);
-  $("final-peak").textContent = String(peakCount);
+  $("final-score").textContent = fmt(run.score);
+  $("final-best").textContent = fmt(best);
+  $("final-peak").textContent = fmt(peakCount);
   const wrap = $("final-perks");
   wrap.innerHTML = "";
   for (const id of legion.perks) {
@@ -391,7 +401,7 @@ muteBtn.addEventListener("click", () => {
 
 qualityBtn.addEventListener("click", () => {
   bloomOn = !bloomOn;
-  saveHighScore(QUALITY_KEY, bloomOn ? 1 : 0);
+  saveHighScore(QUALITY_KEY, bloomOn ? 2 : 1);
   qualityBtn.textContent = `Effects: ${bloomOn ? "High" : "Lite"}`;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, bloomOn ? 1.5 : 1.25));
   if (bloomOn && !composer) {
@@ -429,7 +439,7 @@ function update(dt) {
     damageTimer -= dt;
     if (pendingDamage > 0 && damageTimer <= 0) {
       const target = findActiveTarget(level, playerZ, legion.x);
-      if (target) spawnNumber(fx, target.x, 2.2, target.z, String(Math.round(pendingDamage)), "#fff3b0");
+      if (target) spawnNumber(fx, target.x, 2.2, target.z, fmt(pendingDamage), "#fff3b0");
       pendingDamage = 0;
       damageTimer = 0.32;
     }

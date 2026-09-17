@@ -27,12 +27,12 @@ export function createRoadTexture(laneHalfWidth = 6, segmentLength = 40) {
   const c = makeCanvas(W, H);
   const g = c.getContext("2d");
 
-  g.fillStyle = "#15161d";
+  g.fillStyle = "#1f2130";
   g.fillRect(0, 0, W, H);
 
   // Speckle + long smeared streaks so the road reads as wet, not flat grey.
   for (let i = 0; i < 2600; i++) {
-    const v = 20 + Math.random() * 34;
+    const v = 32 + Math.random() * 40;
     g.fillStyle = `rgba(${v},${v + 2},${v + 8},${0.25 + Math.random() * 0.4})`;
     g.fillRect(Math.random() * W, Math.random() * H, 1 + Math.random() * 2, 1 + Math.random() * 2);
   }
@@ -78,7 +78,7 @@ export function createRoadTexture(laneHalfWidth = 6, segmentLength = 40) {
 export function createSidewalkTexture() {
   const c = makeCanvas(128, 128);
   const g = c.getContext("2d");
-  g.fillStyle = "#23242e";
+  g.fillStyle = "#32343f";
   g.fillRect(0, 0, 128, 128);
   for (let i = 0; i < 700; i++) {
     const v = 30 + Math.random() * 26;
@@ -114,7 +114,7 @@ export function createFacadeTextures() {
   const a = albedo.getContext("2d");
   const e = emissive.getContext("2d");
 
-  a.fillStyle = "#171a26";
+  a.fillStyle = "#23283a";
   a.fillRect(0, 0, W, H);
   for (let i = 0; i < 1400; i++) {
     const v = 20 + Math.random() * 20;

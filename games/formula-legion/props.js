@@ -65,7 +65,7 @@ function labelSprite(op) {
   const tex = new THREE.CanvasTexture(c);
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   const s = new THREE.Sprite(mat);
-  s.scale.set(3.3, 1.65, 1);
+  s.scale.set(3.0, 1.5, 1);
   return s;
 }
 
@@ -144,7 +144,7 @@ function buildGate(ev) {
     sideGroup.add(pad);
 
     const label = labelSprite(op);
-    label.position.set(0, 5.9, 0);
+    label.position.set(0, 5.6, 0);
     sideGroup.add(label);
 
     g.add(sideGroup);
@@ -296,6 +296,11 @@ export function updateLevelProps(props, level, playerZ, legionX, time) {
       vis.group.visible = near && !ev.applied;
       if (!vis.group.visible) continue;
       const pick = legionX < 0 ? 0 : 1;
+      // Gates stay visible far down the track, but their labels would pile up
+      // into an unreadable clump in perspective — so only the approaching gate
+      // carries readable text.
+      const dz = ev.z - playerZ;
+      const labelFade = Math.max(0, Math.min(1, 1 - (dz - 16) / 20));
       for (let i = 0; i < 2; i++) {
         const s = vis.sides[i];
         const on = i === pick;
@@ -303,8 +308,9 @@ export function updateLevelProps(props, level, playerZ, legionX, time) {
         s.pad.material.opacity = on ? 0.4 : 0.1;
         s.tex.offset.y = (time * 0.35) % 1;
         const pulse = on ? 1 + Math.sin(time * 9) * 0.05 : 1;
-        s.label.scale.set(3.3 * pulse, 1.65 * pulse, 1);
-        s.label.material.opacity = on ? 1 : 0.72;
+        s.label.scale.set(3.0 * pulse, 1.5 * pulse, 1);
+        s.label.visible = labelFade > 0.02;
+        s.label.material.opacity = (on ? 1 : 0.72) * labelFade;
       }
       continue;
     }

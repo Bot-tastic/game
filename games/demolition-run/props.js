@@ -7,9 +7,39 @@
 // glass, wood, concrete and sheet metal all come apart differently.
 
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 const CAPACITY = 26;
+
+// Minimal geometry merge: de-index each part and concatenate the attributes we
+// actually use. Hand-rolled so the game never depends on a second CDN file.
+const MERGE_ATTRS = ["position", "normal", "uv", "color"];
+
+function mergeParts(geos) {
+  const out = {};
+  for (const name of MERGE_ATTRS) out[name] = [];
+  for (const g of geos) {
+    const index = g.index ? g.index.array : null;
+    const count = index ? index.length : g.attributes.position.count;
+    for (const name of MERGE_ATTRS) {
+      const attr = g.attributes[name];
+      if (!attr) continue;
+      const size = attr.itemSize;
+      const src = attr.array;
+      const dst = out[name];
+      for (let i = 0; i < count; i++) {
+        const k = (index ? index[i] : i) * size;
+        for (let c = 0; c < size; c++) dst.push(src[k + c]);
+      }
+    }
+    g.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute("position", new THREE.Float32BufferAttribute(out.position, 3));
+  if (out.normal.length) merged.setAttribute("normal", new THREE.Float32BufferAttribute(out.normal, 3));
+  if (out.uv.length) merged.setAttribute("uv", new THREE.Float32BufferAttribute(out.uv, 2));
+  if (out.color.length) merged.setAttribute("color", new THREE.Float32BufferAttribute(out.color, 3));
+  return merged;
+}
 const FAR = new THREE.Matrix4().makeTranslation(0, -900, 0);
 
 function tint(geo, hex) {
@@ -208,7 +238,7 @@ export function createPropsPool(scene) {
   const types = {};
   for (const id of PROP_TYPES) {
     const { solid, glow } = BUILDERS[id]();
-    const geo = mergeGeometries(solid, false);
+    const geo = mergeParts(solid);
     geo.computeVertexNormals();
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const mesh = new THREE.InstancedMesh(geo, mat, CAPACITY);
@@ -218,7 +248,7 @@ export function createPropsPool(scene) {
 
     let glowMesh = null;
     if (glow.length) {
-      const ggeo = mergeGeometries(glow, false);
+      const ggeo = mergeParts(glow);
       const gmat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
       glowMesh = new THREE.InstancedMesh(ggeo, gmat, CAPACITY);
       glowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

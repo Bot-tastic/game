@@ -17,13 +17,23 @@ export const HIT_RADIUS = 1.0;
 export const COIN_RADIUS = 1.3;
 export const WARN_DISTANCE = 42;
 
-const SWITCH_TIME = 0.4; // seconds budgeted per column switch when sizing HP
-const TARGET_FRACTION = 0.8; // wall HP as a fraction of the reference max damage
+const SWITCH_TIME = 0.18; // seconds budgeted per column switch when sizing HP
+// Wall HP as a fraction of what the reference legion could theoretically pour
+// into the firing window. It starts generous and climbs past 1 deep into a
+// run, so even flawless play eventually meets a wall it cannot break — that's
+// what ends an endless run, rather than a bad roll.
+function targetFraction(index) {
+  const ramp = clamp(index / 20, 0, 1);
+  // Past the plateau the curve keeps creeping so an endless run always ends
+  // eventually, no matter how well the meta perks have stacked.
+  return 0.38 + ramp * 0.85 + Math.max(0, index - 20) * 0.13;
+}
 
 export const BASE_COUNT = 10;
 export const BASE_FIRE_RATE = 3.2;
 export const BASE_DAMAGE = 3;
 export const MIN_FIRE_RATE = 1;
+export const MAX_FIRE_RATE = 14;
 export const MAX_TIER = 6;
 export const TIER_STEP = 1.45; // damage multiplier per weapon tier
 
@@ -111,9 +121,9 @@ function clamp(v, min, max) {
 
 /** Deterministic level def for any level index (0-based). Infinite. */
 export function getLevelDef(index) {
-  const difficulty = clamp(index / 18, 0, 1);
+  const difficulty = clamp(index / 26, 0, 1);
   const speed = 13 + difficulty * 6;
-  const duration = 26 + ((index * 7) % 9); // 26-34s — short, punchy levels
+  const duration = 20 + ((index * 7) % 7); // 20-26s — short, punchy levels
   const boss = (index + 1) % 3 === 0;
   return {
     id: index + 1,
@@ -121,6 +131,7 @@ export function getLevelDef(index) {
     difficulty,
     speed,
     boss,
+    hpScale: targetFraction(index),
     theme: THEMES[index % THEMES.length],
     length: Math.round(speed * duration),
   };
@@ -130,42 +141,73 @@ export function getLevelDef(index) {
 
 export const GOOD_KINDS = new Set(["countAdd", "countMul", "rateUp", "tierUp", "shieldUp"]);
 
-const GOOD_OPS = ["countAdd", "countMul", "rateUp", "tierUp", "shieldUp"];
-const BAD_OPS = ["countSub", "countDiv", "rateDown"];
+// Weighted so that "+N troops" is the backbone of the economy and the rarer
+// multiply gates stay a genuine spike. Sizing count ops in absolute,
+// difficulty-scaled numbers (rather than as a share of the legion) keeps the
+// headcount curve readable instead of doubling every few seconds forever.
+const GOOD_OPS = [
+  ["countAdd", 0.38],
+  ["rateUp", 0.23],
+  ["tierUp", 0.09],
+  ["shieldUp", 0.22],
+  ["countMul", 0.08],
+];
+const BAD_OPS = [
+  ["countSub", 0.42],
+  ["rateDown", 0.33],
+  ["countDiv", 0.25],
+];
 
-function makeOp(kind, rng, difficulty) {
+function pick(table, rng) {
+  let r = rng();
+  for (const [kind, w] of table) {
+    if (r < w) return kind;
+    r -= w;
+  }
+  return table[0][0];
+}
+
+/** Typical size of a count swing at this point in the run. */
+function countScale(difficulty) {
+  return 12 + difficulty * 58;
+}
+
+function makeOp(kind, rng, difficulty, refCount) {
   let value = 1;
   let label = "";
   let sub = "";
   switch (kind) {
+    // Count ops are sized against the reference legion for this point in the
+    // level, so "+" always reads as a real boost and "-" always stings,
+    // whether the player arrives with 12 troops or 400.
     case "countAdd":
-      value = 8 + Math.floor(rng() * 14) + Math.floor(difficulty * 20);
+      value = Math.max(8, Math.round(countScale(difficulty) * (0.7 + rng() * 0.9)));
       label = `+${value}`;
       sub = "TROOPS";
       break;
     case "countMul":
-      value = rng() < 0.65 ? 2 : 3;
+      value = rng() < 0.85 ? 2 : 3;
       label = `×${value}`;
       sub = "TROOPS";
       break;
     case "countSub":
-      value = 5 + Math.floor(rng() * 8) + Math.floor(difficulty * 12);
+      value = Math.max(5, Math.round(countScale(difficulty) * (0.5 + rng() * 0.6)));
       label = `−${value}`;
       sub = "TROOPS";
       break;
     case "countDiv":
-      value = rng() < 0.7 ? 2 : 3;
+      value = rng() < 0.8 ? 2 : 3;
       label = `÷${value}`;
       sub = "TROOPS";
       break;
     case "rateUp":
-      value = 1.2 + Math.floor(rng() * 3) * 0.1;
-      label = `×${value.toFixed(1)}`;
+      value = 0.4 + Math.floor(rng() * 4) * 0.2;
+      label = `+${value.toFixed(1)}`;
       sub = "FIRE RATE";
       break;
     case "rateDown":
-      value = 0.6 + Math.floor(rng() * 3) * 0.1;
-      label = `×${value.toFixed(1)}`;
+      value = 0.4 + Math.floor(rng() * 4) * 0.2;
+      label = `−${value.toFixed(1)}`;
       sub = "FIRE RATE";
       break;
     case "tierUp":
@@ -205,10 +247,10 @@ export function applyGateOp(state, op) {
       state.count = Math.max(1, Math.floor(state.count / op.value));
       break;
     case "rateUp":
-      state.fireRate *= op.value;
+      state.fireRate = Math.min(MAX_FIRE_RATE, state.fireRate + op.value);
       break;
     case "rateDown":
-      state.fireRate = Math.max(MIN_FIRE_RATE, state.fireRate * op.value);
+      state.fireRate = Math.max(MIN_FIRE_RATE, state.fireRate - op.value);
       break;
     case "tierUp":
       state.tier = Math.min(MAX_TIER, state.tier + 1);
@@ -222,8 +264,8 @@ export function applyGateOp(state, op) {
   }
 }
 
-/** The pessimistic version of a risk gate, used only for HP sizing. */
-export const RISK_WORST = { kind: "countDiv", value: 3, label: "÷3", sub: "TROOPS" };
+/** The optimistic version of a risk gate, used only for HP sizing. */
+export const RISK_BEST = { kind: "countMul", value: 2, label: "×2", sub: "TROOPS" };
 /** Roll what a risk gate actually does when the player drives through it. */
 export function rollRisk(rng) {
   const r = rng();
@@ -237,25 +279,20 @@ function dpsOf(state) {
   return state.count * state.fireRate * BASE_DAMAGE * Math.pow(TIER_STEP, state.tier - 1);
 }
 
-// Walls are sized against a reference legion updated per dimension: a gate
-// changes exactly one of {count, fireRate, tier}, so for each dimension we
-// take the worse of the two sides and nudge it 45% toward the better one.
-// Sizing purely off the worst case would make walls melt for anyone reading
-// the gates; this blend means good reads shred walls, sloppy reads cost
-// troops, and nothing is ever unwinnable RNG.
-const REF_BLEND = 0.45;
-
-function blendGateUpdate(ref, left, right) {
-  const l = left.kind === "risk" ? RISK_WORST : left;
-  const r = right.kind === "risk" ? RISK_WORST : right;
+// Walls are sized against a reference legion that takes the BEST outcome each
+// gate offers, per dimension (a gate only ever changes one of count/fireRate/
+// tier). Wall HP is then a fraction of what that ideal legion could deal, so
+// reading the gates correctly keeps you level with the curve and every misread
+// is felt immediately — the difficulty comes from your choices, not the seed.
+function bestCaseGateUpdate(ref, left, right) {
+  const l = left.kind === "risk" ? RISK_BEST : left;
+  const r = right.kind === "risk" ? RISK_BEST : right;
   for (const dim of ["count", "fireRate", "tier"]) {
     const a = { ...ref };
     applyGateOp(a, l);
     const b = { ...ref };
     applyGateOp(b, r);
-    const lo = Math.min(a[dim], b[dim]);
-    const hi = Math.max(a[dim], b[dim]);
-    ref[dim] = lo + (hi - lo) * REF_BLEND;
+    ref[dim] = Math.max(a[dim], b[dim]);
   }
   ref.count = Math.max(1, ref.count);
   ref.tier = Math.max(1, ref.tier);
@@ -266,22 +303,22 @@ function blendGateUpdate(ref, left, right) {
  * right answer if you're paying attention); some are good-vs-good of
  * different flavours (a real decision); occasionally risk-vs-safe.
  */
-function rollGatePair(rng, difficulty) {
+function rollGatePair(rng, difficulty, refCount) {
   const roll = rng();
   let left, right;
   if (roll < 0.14) {
-    left = makeOp("risk", rng, difficulty);
-    right = makeOp(GOOD_OPS[Math.floor(rng() * 2)], rng, difficulty);
+    left = makeOp("risk", rng, difficulty, refCount);
+    right = makeOp(pick(GOOD_OPS, rng), rng, difficulty, refCount);
   } else if (roll < 0.42) {
-    const a = GOOD_OPS[Math.floor(rng() * GOOD_OPS.length)];
-    let b = GOOD_OPS[Math.floor(rng() * GOOD_OPS.length)];
+    const a = pick(GOOD_OPS, rng);
+    let b = pick(GOOD_OPS, rng);
     let guard = 0;
-    while (b === a && guard++ < 8) b = GOOD_OPS[Math.floor(rng() * GOOD_OPS.length)];
-    left = makeOp(a, rng, difficulty);
-    right = makeOp(b, rng, difficulty);
+    while (b === a && guard++ < 8) b = pick(GOOD_OPS, rng);
+    left = makeOp(a, rng, difficulty, refCount);
+    right = makeOp(b, rng, difficulty, refCount);
   } else {
-    left = makeOp(GOOD_OPS[Math.floor(rng() * GOOD_OPS.length)], rng, difficulty);
-    right = makeOp(BAD_OPS[Math.floor(rng() * BAD_OPS.length)], rng, difficulty);
+    left = makeOp(pick(GOOD_OPS, rng), rng, difficulty, refCount);
+    right = makeOp(pick(BAD_OPS, rng), rng, difficulty, refCount);
   }
   if (rng() < 0.5) {
     const t = left;
@@ -295,10 +332,10 @@ function rollGatePair(rng, difficulty) {
 
 function makeWall(rng, ref, def, z, boss) {
   const window = RANGE / def.speed;
-  const cols = boss ? 3 : 1 + Math.floor(rng() * 4);
+  const cols = boss ? 3 : Math.min(4, 1 + Math.floor(rng() * (2.2 + def.difficulty * 2.2)));
   const rows = boss ? 4 : 1 + Math.floor(rng() * Math.min(3, 1 + def.difficulty * 2.4));
-  const usableWindow = Math.max(window * 0.4, window - cols * SWITCH_TIME);
-  const totalHp = dpsOf(ref) * usableWindow * TARGET_FRACTION * (boss ? 1.25 : 1);
+  const usableWindow = Math.max(window * 0.7, window - cols * SWITCH_TIME);
+  const totalHp = dpsOf(ref) * usableWindow * def.hpScale * (boss ? 1.3 : 1);
 
   const colX = [];
   const colHp = [];
@@ -331,11 +368,27 @@ function makeWall(rng, ref, def, z, boss) {
 /**
  * Build the full event list for a level def. Returns { ...def, events }
  * where events is a z-ascending array of gate / wall / coins entries.
+ *
+ * `startState` is the legion the player actually arrives with. Walls are
+ * sized relative to it (not to a fresh base legion), so a level is always a
+ * real test of the army you built rather than trivia for a carried-over
+ * legion — and a mauled legion meets proportionally softer walls instead of
+ * entering an unrecoverable death spiral.
  */
-export function generateLevel(def) {
+export function generateLevel(def, startState) {
   const rng = mulberry32(def.seed);
   const events = [];
-  const ref = { count: BASE_COUNT, fireRate: BASE_FIRE_RATE, tier: 1, shields: 0 };
+  // The reference is floored by a curve that grows with depth, so a mauled
+  // legion still meets softer walls (no death spiral) while the floor keeps
+  // rising past what any legion can reach — that's what eventually ends an
+  // endless run instead of a lucky seed.
+  const floorCount = BASE_COUNT * Math.pow(1.72, def.id - 1);
+  const ref = {
+    count: Math.max(BASE_COUNT, floorCount, Math.round(startState ? startState.count : BASE_COUNT)),
+    fireRate: Math.max(BASE_FIRE_RATE, startState ? startState.fireRate : BASE_FIRE_RATE),
+    tier: Math.max(1, startState ? startState.tier : 1),
+    shields: 0,
+  };
   const window = RANGE / def.speed;
 
   const marginEnd = def.speed * (def.boss ? 6 : 3);
@@ -344,7 +397,7 @@ export function generateLevel(def) {
 
   while (cursor < def.length - marginEnd) {
     const r = rng();
-    const wantWall = lastType !== "wall" && r < 0.5;
+    const wantWall = lastType !== null && lastType !== "wall" && r < 0.5;
     const wantCoins = !wantWall && lastType !== "coins" && r > 0.86;
 
     if (wantCoins) {
@@ -367,8 +420,8 @@ export function generateLevel(def) {
       lastType = "wall";
       cursor += Math.max(def.speed * window + def.speed * 0.6, def.speed * (2.0 + rng() * 1.0));
     } else {
-      const { left, right } = rollGatePair(rng, def.difficulty);
-      blendGateUpdate(ref, left, right);
+      const { left, right } = rollGatePair(rng, def.difficulty, ref.count);
+      bestCaseGateUpdate(ref, left, right);
       events.push({ type: "gate", z: cursor, left, right, applied: false, chosen: null });
       lastType = "gate";
       cursor += def.speed * (1.4 + rng() * 0.9);

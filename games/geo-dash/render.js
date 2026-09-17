@@ -76,9 +76,41 @@ function makeDecoField(seed, count, yMin, yMax) {
   return out;
 }
 
-const FAR_FIELD = makeDecoField(9901, 16, -60, 250);
-const MID_FIELD = makeDecoField(4242, 12, -50, 260);
-const NEAR_FIELD = makeDecoField(1717, 8, 40, 270);
+const FAR_FIELD = makeDecoField(9901, 42, -470, 250);
+const MID_FIELD = makeDecoField(4242, 31, -450, 255);
+const NEAR_FIELD = makeDecoField(1717, 21, -400, 270);
+
+// Fine drifting dust; cheap, and it stops the open sky reading as dead space.
+// Backdrop architecture: dark pillars and arches standing on the horizon. They
+// are never solid — they sit behind the terrain and give each frame something
+// built to look at, the way a real level's background decoration does.
+const STRUCTURES = (() => {
+  const rnd = mulberry32(777);
+  const out = [];
+  let x = 0;
+  while (x < DECO_SPAN) {
+    const w = 34 + rnd() * 80;
+    out.push({
+      x,
+      w,
+      h: 40 + rnd() * 120,
+      arch: rnd() < 0.4,
+      notch: 0.2 + rnd() * 0.5,
+      lights: 2 + Math.floor(rnd() * 4),
+    });
+    x += w + 60 + rnd() * 220;
+  }
+  return out;
+})();
+
+const STAR_FIELD = (() => {
+  const rnd = mulberry32(2024);
+  const out = [];
+  for (let i = 0; i < 70; i++) {
+    out.push({ x: rnd() * DECO_SPAN, y: -520 + rnd() * 800, r: 0.6 + rnd() * 1.9, tw: rnd() * 6.28, d: 0.06 + rnd() * 0.5 });
+  }
+  return out;
+})();
 
 function polyPath(ctx, x, y, r, sides, rot) {
   ctx.beginPath();
@@ -119,7 +151,7 @@ export function createRenderer(canvas) {
     H = h;
     scale = Math.min(w / VIEW_W, h / BAND_H);
     const bandH = BAND_H * scale;
-    bandTop = Math.max(0, (h - bandH) * 0.58);
+    bandTop = Math.max(0, (h - bandH) * 0.72);
     groundPattern = null;
   }
 
@@ -159,18 +191,39 @@ export function createRenderer(canvas) {
     const t = s.theme;
     const pulse = s.pulse;
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, shade(t.sky0, -0.2));
-    grad.addColorStop(0.55, t.sky0);
+    grad.addColorStop(0, shade(t.sky0, 0.16));
+    grad.addColorStop(0.5, shade(t.sky0, -0.05));
     grad.addColorStop(1, mix(t.sky1, t.accent, 0.12 + pulse * 0.1));
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // Horizon glow sitting just above the ground line, pumping on the beat.
+    // A distant disc sitting on the horizon gives the sky a focal point.
     const gy = sy(GROUND_Y);
+    const sunR = Math.min(W, H) * 0.34;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const sun = ctx.createRadialGradient(W * 0.68, gy - sunR * 0.42, sunR * 0.1, W * 0.68, gy - sunR * 0.42, sunR);
+    sun.addColorStop(0, rgba(t.accent2, 0.3));
+    sun.addColorStop(0.42, rgba(t.accent, 0.14));
+    sun.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = sun;
+    ctx.beginPath();
+    ctx.arc(W * 0.68, gy - sunR * 0.42, sunR, 0, Math.PI * 2);
+    ctx.fill();
+    // Scan bands across the disc — a cheap retro-sun read.
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = shade(t.sky0, -0.2);
+    for (let i = 0; i < 7; i++) {
+      const by = gy - sunR * 0.42 + sunR * (0.1 + i * 0.13);
+      ctx.fillRect(W * 0.68 - sunR, by, sunR * 2, sunR * 0.035 * (1 + i * 0.5));
+    }
+    ctx.restore();
+
+    // Horizon glow sitting just above the ground line, pumping on the beat.
     const r = Math.max(W, H) * (0.55 + pulse * 0.08);
     const glow = ctx.createRadialGradient(W * 0.5, gy, 0, W * 0.5, gy, r);
-    glow.addColorStop(0, rgba(t.accent, 0.3 + pulse * 0.16));
-    glow.addColorStop(0.45, rgba(t.accent2, 0.07));
+    glow.addColorStop(0, rgba(t.accent, 0.4 + pulse * 0.2));
+    glow.addColorStop(0.45, rgba(t.accent2, 0.1));
     glow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = glow;
@@ -205,21 +258,101 @@ export function createRenderer(canvas) {
     void t;
   }
 
+  function drawStars(s) {
+    const span = DECO_SPAN * scale;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const st of STAR_FIELD) {
+      const shift = (s.camX * st.d * scale) % span;
+      for (let rep = 0; rep <= Math.ceil(W / span) + 1; rep++) {
+        const px = st.x * scale + rep * span - shift;
+        if (px < -6 || px > W + 6) continue;
+        const py = sy(st.y);
+        if (py < -6 || py > H + 6) continue;
+        ctx.globalAlpha = 0.25 + 0.55 * Math.abs(Math.sin(s.time * 1.4 + st.tw));
+        ctx.fillStyle = st.d > 0.3 ? s.theme.accent2 : "#ffffff";
+        ctx.fillRect(px, py, st.r * scale, st.r * scale);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawStructures(s) {
+    const t = s.theme;
+    const span = DECO_SPAN * scale;
+    const depth = 0.42;
+    const shift = (s.camX * depth * scale) % span;
+    const gy = sy(GROUND_Y);
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    for (let rep = 0; rep <= Math.ceil(W / span) + 1; rep++) {
+      for (const st of STRUCTURES) {
+        const px = st.x * scale + rep * span - shift;
+        const pw = st.w * scale;
+        if (px + pw < -20 || px > W + 20) continue;
+        const ph = st.h * scale;
+        const py = gy - ph;
+
+        const g = ctx.createLinearGradient(0, py, 0, gy);
+        g.addColorStop(0, mix(t.sky1, "#000000", 0.42));
+        g.addColorStop(1, mix(t.sky1, t.accent, 0.3));
+        ctx.fillStyle = g;
+        if (st.arch) {
+          ctx.beginPath();
+          ctx.moveTo(px, gy);
+          ctx.lineTo(px, py + pw * 0.5);
+          ctx.arc(px + pw / 2, py + pw * 0.5, pw / 2, Math.PI, 0);
+          ctx.lineTo(px + pw, gy);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          ctx.fillRect(px, py, pw, ph);
+          ctx.fillStyle = mix(t.sky1, "#000000", 0.55);
+          ctx.fillRect(px + pw * st.notch, py, pw * 0.16, ph * 0.7);
+        }
+
+        // Rim + window lights so the silhouettes are not dead shapes.
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = rgba(t.accent, 0.22);
+        ctx.lineWidth = Math.max(1, 1.2 * scale);
+        ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph);
+        for (let i = 0; i < st.lights; i++) {
+          const ly = py + ph * (0.18 + i * 0.2);
+          if (ly > gy - 4) break;
+          ctx.fillStyle = rgba(t.glow, 0.14 + s.pulse * 0.26);
+          ctx.fillRect(px + pw * 0.22, ly, pw * 0.56, 2 * scale);
+        }
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+
+    // Atmospheric veil: pushes the whole layer behind the playfield so nothing
+    // back here can be mistaken for something you are allowed to land on.
+    const veil = ctx.createLinearGradient(0, gy - 300 * scale, 0, gy);
+    veil.addColorStop(0, rgba(t.sky0, 0.3));
+    veil.addColorStop(0.75, rgba(t.sky0, 0.78));
+    veil.addColorStop(1, rgba(t.sky0, 0.92));
+    ctx.fillStyle = veil;
+    ctx.fillRect(0, gy - 300 * scale, W, 300 * scale);
+  }
+
   function drawGrid(s) {
     const t = s.theme;
     const gy = sy(GROUND_Y);
     const spacing = TILE * 2 * scale;
     const shift = (s.camX * 0.35 * scale) % spacing;
     ctx.save();
-    ctx.globalAlpha = 0.16 + s.pulse * 0.08;
+    ctx.globalAlpha = 0.17 + s.pulse * 0.1;
     ctx.strokeStyle = t.accent2;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = -shift; x < W + spacing; x += spacing) {
-      ctx.moveTo(x, Math.max(0, bandTop));
+      ctx.moveTo(x, 0);
       ctx.lineTo(x, gy);
     }
-    for (let y = gy; y > Math.max(-spacing, bandTop - spacing); y -= spacing) {
+    for (let y = gy; y > -spacing; y -= spacing) {
       ctx.moveTo(0, y);
       ctx.lineTo(W, y);
     }
@@ -229,55 +362,73 @@ export function createRenderer(canvas) {
 
   function drawBackground(s) {
     drawSky(s);
-    drawDecoLayer(s, FAR_FIELD, 0.1, { color: s.theme.accent2, alpha: 0.13, line: 2 * scale, sizeMul: 1.5, additive: false });
+    drawStars(s);
+    drawDecoLayer(s, FAR_FIELD, 0.1, { color: s.theme.accent2, alpha: 0.4, line: 2.4 * scale, sizeMul: 1.5, additive: true });
     drawGrid(s);
-    drawDecoLayer(s, MID_FIELD, 0.28, { color: s.theme.accent, alpha: 0.16, line: 2.5 * scale, sizeMul: 1, additive: true });
-    drawDecoLayer(s, NEAR_FIELD, 0.55, { color: s.theme.sky1, alpha: 0.5, line: 0, sizeMul: 0.75, fill: true, additive: false });
+    drawDecoLayer(s, MID_FIELD, 0.28, { color: s.theme.accent, alpha: 0.5, line: 3 * scale, sizeMul: 1, additive: true });
+    drawStructures(s);
+    drawDecoLayer(s, NEAR_FIELD, 0.55, { color: s.theme.sky1, alpha: 0.65, line: 0, sizeMul: 0.75, fill: true, additive: false });
+    drawDecoLayer(s, NEAR_FIELD, 0.55, { color: s.theme.accent, alpha: 0.45, line: 2.4 * scale, sizeMul: 0.75, additive: true });
   }
 
   // -- terrain -------------------------------------------------------------
 
-  function drawSlab(s, x0, x1, topY, downward) {
+  // A terrain slab: `topY` is the world Y of the surface, `downward` says which
+  // way the material extends. Dark body, patterned face, hot neon lip — the lip
+  // is what the player actually reads, so it gets the glow budget.
+  function drawSlab(s, x0, x1, topY, downward, depthWorld) {
     const t = s.theme;
     const y = sy(topY);
-    const h = downward ? H - y + 4 : y - Math.min(y, bandTop - 400);
-    const yy = downward ? y : y - h;
+    const depth = depthWorld * scale;
+    const yy = downward ? y : y - depth;
+    const hh = downward ? Math.max(depth, H - y + 4) : depth;
     if (!groundPattern || patternTheme !== t) buildGroundPattern(t);
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x0, yy, x1 - x0, h);
+    ctx.rect(x0, yy, x1 - x0, hh);
     ctx.clip();
 
-    const grad = ctx.createLinearGradient(0, downward ? y : y - 150 * scale, 0, downward ? y + 260 * scale : y);
-    grad.addColorStop(0, mix(t.ground, "#000000", 0.05));
-    grad.addColorStop(1, mix(t.sky0, "#000000", 0.35));
+    const near = downward ? y : y;
+    const far = downward ? y + hh : y - hh;
+    const grad = ctx.createLinearGradient(0, near, 0, far);
+    grad.addColorStop(0, mix(t.ground, "#000000", 0.45));
+    grad.addColorStop(0.35, mix(t.sky0, "#000000", 0.35));
+    grad.addColorStop(1, "#04050a");
     ctx.fillStyle = grad;
-    ctx.fillRect(x0, yy, x1 - x0, h);
+    ctx.fillRect(x0, yy, x1 - x0, hh);
 
     ctx.save();
     ctx.translate(-((s.camX * scale) % 64), 0);
-    ctx.globalAlpha = 0.55;
+    ctx.globalAlpha = 0.3;
     ctx.fillStyle = groundPattern;
-    ctx.fillRect(x0 - 64, yy, x1 - x0 + 128, h);
-    ctx.restore();
+    ctx.fillRect(x0 - 64, yy, x1 - x0 + 128, hh);
     ctx.restore();
 
-    // Glowing lip.
-    const edgeY = y;
+    // Inner glow bleeding away from the lip.
+    const eg = ctx.createLinearGradient(0, y, 0, y + (downward ? 1 : -1) * 54 * scale);
+    eg.addColorStop(0, rgba(t.glow, 0.5));
+    eg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = eg;
+    ctx.fillRect(x0, downward ? y : y - 54 * scale, x1 - x0, 54 * scale);
+    ctx.restore();
+
+    // Outer bloom above the lip.
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    const eg = ctx.createLinearGradient(0, edgeY - 22 * scale * (downward ? 1 : -1), 0, edgeY);
-    eg.addColorStop(0, "rgba(0,0,0,0)");
-    eg.addColorStop(1, rgba(t.glow, 0.42 + s.pulse * 0.2));
-    ctx.fillStyle = eg;
-    ctx.fillRect(x0, downward ? edgeY - 22 * scale : edgeY, x1 - x0, 22 * scale);
+    const bg = ctx.createLinearGradient(0, y - (downward ? 1 : -1) * 34 * scale, 0, y);
+    bg.addColorStop(0, "rgba(0,0,0,0)");
+    bg.addColorStop(1, rgba(t.glow, 0.28 + s.pulse * 0.22));
+    ctx.fillStyle = bg;
+    ctx.fillRect(x0, downward ? y - 34 * scale : y, x1 - x0, 34 * scale);
     ctx.restore();
 
-    ctx.fillStyle = t.glow;
-    ctx.fillRect(x0, downward ? edgeY - 2.5 * scale : edgeY, x1 - x0, 2.5 * scale);
-    ctx.fillStyle = rgba(t.accent2, 0.55);
-    ctx.fillRect(x0, downward ? edgeY - 5 * scale : edgeY + 2.5 * scale, x1 - x0, 1.5 * scale);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x0, downward ? y - 1.5 * scale : y, x1 - x0, 1.8 * scale);
+    ctx.fillStyle = rgba(t.glow, 0.95);
+    ctx.fillRect(x0, downward ? y : y - 3.2 * scale, x1 - x0, 3.2 * scale);
+    ctx.fillStyle = rgba(t.accent2, 0.5);
+    ctx.fillRect(x0, downward ? y + 3.4 * scale : y - 5.6 * scale, x1 - x0, 1.6 * scale);
   }
 
   function drawTerrain(s) {
@@ -286,13 +437,15 @@ export function createRenderer(canvas) {
       const x0 = s.sx(f.x);
       const x1 = s.sx(f.x + f.w);
       if (x1 < -40 || x0 > W + 40) continue;
-      drawSlab(s, Math.max(-40, x0), Math.min(W + 40, x1), f.y, true);
+      drawSlab(s, Math.max(-40, x0), Math.min(W + 40, x1), f.y, true, 220);
     }
-    for (const c of lv.ceiling) {
-      const x0 = s.sx(c.x);
-      const x1 = s.sx(c.x + c.w);
-      if (x1 < -40 || x0 > W + 40) continue;
-      drawSlab(s, Math.max(-40, x0), Math.min(W + 40, x1), c.y + c.h, false);
+    if (lv.usesCeiling) {
+      for (const c of lv.ceiling) {
+        const x0 = s.sx(c.x);
+        const x1 = s.sx(c.x + c.w);
+        if (x1 < -40 || x0 > W + 40) continue;
+        drawSlab(s, Math.max(-40, x0), Math.min(W + 40, x1), c.y + c.h, false, TILE * 2.4);
+      }
     }
     // Pit void: a hard dark band with hot edges so a gap never reads as floor.
     for (const p of lv.pits) {
@@ -301,15 +454,15 @@ export function createRenderer(canvas) {
       if (x1 < -40 || x0 > W + 40) continue;
       const gy = sy(GROUND_Y);
       const g = ctx.createLinearGradient(0, gy, 0, H);
-      g.addColorStop(0, "rgba(4,4,8,0.95)");
+      g.addColorStop(0, "rgba(4,4,8,0.96)");
       g.addColorStop(1, "rgba(0,0,0,1)");
       ctx.fillStyle = g;
-      ctx.fillRect(x0, gy, x1 - x0, H - gy);
+      ctx.fillRect(x0, gy - 2, x1 - x0, H - gy + 2);
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.fillStyle = rgba(s.theme.accent2, 0.7);
-      ctx.fillRect(x0 - 2 * scale, gy, 3 * scale, 44 * scale);
-      ctx.fillRect(x1 - scale, gy, 3 * scale, 44 * scale);
+      ctx.fillStyle = rgba(s.theme.accent2, 0.8);
+      ctx.fillRect(x0 - 2 * scale, gy, 3 * scale, 54 * scale);
+      ctx.fillRect(x1 - scale, gy, 3 * scale, 54 * scale);
       ctx.restore();
     }
   }
@@ -326,9 +479,9 @@ export function createRenderer(canvas) {
 
     const thin = r.style === "plat";
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, mix(t.sky1, "#ffffff", 0.18));
-    grad.addColorStop(0.5, mix(t.sky1, "#000000", 0.28));
-    grad.addColorStop(1, mix(t.sky0, "#000000", 0.4));
+    grad.addColorStop(0, mix(t.sky1, "#ffffff", 0.14));
+    grad.addColorStop(0.45, mix(t.sky1, "#000000", 0.55));
+    grad.addColorStop(1, "#05060b");
     roundRect(ctx, x, y, w, h, thin ? h / 2 : Math.min(7 * scale, h / 3));
     ctx.fillStyle = grad;
     ctx.fill();
@@ -337,7 +490,7 @@ export function createRenderer(canvas) {
     if (!thin && w > 18 * scale && h > 18 * scale) {
       ctx.save();
       ctx.clip();
-      ctx.strokeStyle = rgba(t.accent, 0.12);
+      ctx.strokeStyle = rgba(t.accent, 0.2);
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let gx = x + TILE * scale; gx < x + w; gx += TILE * scale) {
@@ -353,8 +506,8 @@ export function createRenderer(canvas) {
     }
 
     // Bevel + emissive rim.
-    ctx.strokeStyle = rgba(t.accent, 0.75);
-    ctx.lineWidth = Math.max(1.5, 2 * scale);
+    ctx.strokeStyle = rgba(t.accent, 0.95);
+    ctx.lineWidth = Math.max(1.6, 2.2 * scale);
     roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, thin ? h / 2 : Math.min(7 * scale, h / 3));
     ctx.stroke();
 
@@ -378,9 +531,9 @@ export function createRenderer(canvas) {
     const tipY = sy(up ? h.y - h.h : h.y + h.h);
 
     const grad = ctx.createLinearGradient(0, baseY, 0, tipY);
-    grad.addColorStop(0, mix(t.sky0, "#000000", 0.25));
-    grad.addColorStop(0.55, mix(t.accent, "#000000", 0.35));
-    grad.addColorStop(1, shade(t.glow, 0.25));
+    grad.addColorStop(0, mix(t.accent, "#000000", 0.55));
+    grad.addColorStop(0.5, t.accent);
+    grad.addColorStop(1, shade(t.glow, 0.55));
 
     ctx.beginPath();
     ctx.moveTo(x, baseY);
@@ -391,8 +544,8 @@ export function createRenderer(canvas) {
     ctx.fill();
 
     // Rim light down the leading edge + a hot tip.
-    ctx.strokeStyle = rgba(t.glow, 0.9);
-    ctx.lineWidth = Math.max(1.2, 1.6 * scale);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(1.4, 2 * scale);
     ctx.beginPath();
     ctx.moveTo(x + w / 2, tipY);
     ctx.lineTo(x + w, baseY);
@@ -673,8 +826,10 @@ export function createRenderer(canvas) {
     ctx.restore();
   }
 
-  function playerColors(s) {
-    return { a: "#ffe066", b: "#ff8a3d", rim: s.theme.glow };
+  function playerColors() {
+    // Fixed player palette: the avatar must stay the brightest, most saturated
+    // thing on screen no matter which theme the level uses.
+    return { a: "#fff3a8", b: "#ff7a2f", rim: "#ffffff" };
   }
 
   function drawPlayer(s) {
@@ -695,6 +850,16 @@ export function createRenderer(canvas) {
     ctx.fillRect(x - w * 2, y - w * 2, w * 4, w * 4);
     ctx.restore();
 
+    // Soft dark halo: separates the avatar from bright backgrounds without
+    // stamping a visible grey disc behind it.
+    ctx.save();
+    const halo = ctx.createRadialGradient(x, y, w * 0.34, x, y, w * 0.95);
+    halo.addColorStop(0, "rgba(4,5,10,0.6)");
+    halo.addColorStop(1, "rgba(4,5,10,0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(x - w, y - w, w * 2, w * 2);
+    ctx.restore();
+
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(p.rotation);
@@ -713,7 +878,7 @@ export function createRenderer(canvas) {
       ctx.lineWidth = Math.max(1.5, 2.4 * scale);
       ctx.stroke();
       roundRect(ctx, -w * 0.24, -h * 0.24, w * 0.48, h * 0.48, 3 * scale);
-      ctx.fillStyle = mix(b, "#000000", 0.45);
+      ctx.fillStyle = mix(b, "#000000", 0.15);
       ctx.fill();
       ctx.strokeStyle = rgba("#ffffff", 0.5);
       ctx.lineWidth = Math.max(1, 1.4 * scale);
@@ -730,7 +895,7 @@ export function createRenderer(canvas) {
       ctx.beginPath();
       ctx.arc(0, 0, w / 2, 0, Math.PI * 2);
       ctx.clip();
-      ctx.fillStyle = mix(b, "#000000", 0.45);
+      ctx.fillStyle = mix(b, "#000000", 0.2);
       for (let i = 0; i < 2; i++) {
         ctx.beginPath();
         ctx.moveTo(0, 0);
@@ -952,7 +1117,7 @@ export function createRenderer(canvas) {
 
   function draw(s) {
     if (!W || !H) return;
-    s.sx = (worldX) => W * 0.3 + (worldX - s.camX) * scale;
+    s.sx = (worldX) => W * 0.28 + (worldX - s.camX) * scale;
     s.sy = sy;
     s.scale = scale;
 

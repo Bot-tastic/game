@@ -92,40 +92,26 @@ function buildCar(scene) {
     wheels.push({ hub, tyre, rim, steers, baseY: 0.42 });
   }
 
-  // headlight beams + the pool of light they throw on the road
+  // The headlights throw a pool of light on the tarmac instead of a visible
+  // cone — volumetric cones read as a ghost artifact from this camera angle.
   const glowTex = createGlowTexture();
-  const beamMat = new THREE.MeshBasicMaterial({
-    color: 0xffe7b8,
-    transparent: true,
-    opacity: 0.1,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  const beamGeo = new THREE.ConeGeometry(1.5, 13, 10, 1, true);
-  beamGeo.rotateX(-Math.PI / 2);
-  beamGeo.translate(0, 0, 6.5);
-  const beamL = new THREE.Mesh(beamGeo, beamMat);
-  beamL.position.set(-0.62, 0.82, 2.0);
-  const beamR = new THREE.Mesh(beamGeo, beamMat);
-  beamR.position.set(0.62, 0.82, 2.0);
-  shell.add(beamL, beamR);
+  const beamMat = new THREE.MeshBasicMaterial({ visible: false });
 
-  const poolGeo = new THREE.PlaneGeometry(9, 22);
+  const poolGeo = new THREE.PlaneGeometry(17, 38);
   poolGeo.rotateX(-Math.PI / 2);
   const roadPool = new THREE.Mesh(
     poolGeo,
     new THREE.MeshBasicMaterial({
       map: glowTex,
-      color: 0xffe0b0,
+      color: 0xffdcae,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.2,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       toneMapped: false,
     })
   );
-  roadPool.position.set(0, 0.05, 11);
+  roadPool.position.set(0, 0.05, 13);
   roadPool.renderOrder = 3;
   group.add(roadPool);
 
@@ -143,8 +129,12 @@ function buildCar(scene) {
     scorch.push(m);
   }
 
+  const headLight = new THREE.PointLight(0xffd7a8, 2.6, 52, 1.8);
+  headLight.position.set(0, 1.6, 6);
+  group.add(headLight);
+
   scene.add(group);
-  return { group, shell, wheels, bodyMat, brakeL, brakeR, roadPool, beamMat, scorch, cabin };
+  return { group, shell, wheels, bodyMat, brakeL, brakeR, roadPool, beamMat, scorch, cabin, headLight };
 }
 
 export function createCar(scene) {
@@ -345,8 +335,7 @@ export function updateCar(car, dt, input, ramps) {
   const braking = car.braking || car.speed < CRUISE_SPEED * 0.55;
   car.brakeL.material.color.setHex(braking ? 0xff2f4a : 0x5a1220);
   car.brakeR.material.color.setHex(braking ? 0xff2f4a : 0x5a1220);
-  car.beamMat.opacity = 0.09 + car.drift * 0.03;
-  car.roadPool.position.z = 11 + car.speed * 0.06;
+  car.roadPool.position.z = 13 + car.speed * 0.08;
   car.roadPool.visible = !car.airborne;
 }
 

@@ -10,9 +10,13 @@
 export const TILE = 30;
 export const GROUND_Y = 300;
 export const CEIL_Y = 0;
-export const VIEW_TOP = -70; // world Y at the top of the drawn band
+export const VIEW_TOP = -150; // world Y at the top of the drawn band
 export const VIEW_BOTTOM = 380; // world Y at the bottom of the drawn band
-export const VIEW_W = 340; // minimum world units visible horizontally
+export const VIEW_W = 420; // minimum world units visible horizontally
+// 420 units is 14 tiles: with the player parked at 28% of the width that is
+// ~1s of lookahead at level-1 speed, which is the reaction window the jump arc
+// (0.6s of airtime) actually needs. Narrower than this and levels stop being
+// readable; wider and the obstacles shrink to specks on a phone.
 
 export const MODES = ["cube", "ship", "ball", "wave", "ufo"];
 
@@ -64,7 +68,7 @@ function makeBuilder(def) {
     spikes(n = 1, opts = {}) {
       const base = opts.y != null ? opts.y : GROUND_Y;
       for (let i = 0; i < n; i++) {
-        level.hazards.push({ type: "spike", dir: "up", x: x + i * TILE, y: base, w: TILE, h: TILE * 0.8 });
+        level.hazards.push({ type: "spike", dir: "up", x: x + i * TILE, y: base, w: TILE, h: TILE });
       }
       return b;
     },
@@ -72,7 +76,7 @@ function makeBuilder(def) {
     spikesDown(n = 1, opts = {}) {
       const base = opts.y != null ? opts.y : CEIL_Y;
       for (let i = 0; i < n; i++) {
-        level.hazards.push({ type: "spike", dir: "down", x: x + i * TILE, y: base, w: TILE, h: TILE * 0.8 });
+        level.hazards.push({ type: "spike", dir: "down", x: x + i * TILE, y: base, w: TILE, h: TILE });
       }
       return b;
     },
@@ -194,10 +198,14 @@ function makeBuilder(def) {
 // Reusable rhythm patterns
 // ---------------------------------------------------------------------------
 
-/** n single spikes, one per `gap` beats. The bread and butter of cube play. */
+/** A run of n spike clusters, one per `gap` beats. The bread and butter of cube
+ * play — every third hit is a double so the run has a shape instead of being a
+ * metronome. A double is 60 units wide against a ~180-unit jump arc, so it stays
+ * inside the same single press. */
 function spikeBeat(b, n, gap = 2) {
   for (let i = 0; i < n; i++) {
-    b.spikes(1);
+    b.spikes(i % 3 === 2 ? 2 : 1);
+    if (i % 4 === 1) b.coin(3.4);
     b.go(gap);
   }
 }
@@ -206,6 +214,7 @@ function spikeBeat(b, n, gap = 2) {
 function stairs(b, steps, gap = 1.4) {
   for (let i = 0; i < steps; i++) {
     b.blk(1, i + 1);
+    if (i === steps - 1) b.coin(i + 2.6);
     b.go(gap);
   }
   for (let i = steps - 1; i >= 1; i--) {
@@ -238,16 +247,16 @@ function tunnelRun(b, beats, lo, hi) {
 // ---------------------------------------------------------------------------
 
 const THEMES = {
-  aqua: { sky0: "#061a22", sky1: "#0b3a44", accent: "#4fe3d0", accent2: "#6ee7ff", ground: "#0e5a63", glow: "#7ff5e6" },
-  cobalt: { sky0: "#070d24", sky1: "#132a63", accent: "#5b8cff", accent2: "#8ce0ff", ground: "#1b3a86", glow: "#a8c6ff" },
-  violet: { sky0: "#130824", sky1: "#331257", accent: "#a06bff", accent2: "#ff7ae0", ground: "#4a1e80", glow: "#d3a9ff" },
-  magenta: { sky0: "#210a1c", sky1: "#5a1244", accent: "#ff5ec4", accent2: "#ffa6e6", ground: "#7d1c5c", glow: "#ffb3e8" },
-  amber: { sky0: "#1f1206", sky1: "#5a3106", accent: "#ffa12e", accent2: "#ffe071", ground: "#8a4b0b", glow: "#ffd28a" },
-  ember: { sky0: "#210806", sky1: "#5e1410", accent: "#ff5a48", accent2: "#ffb057", ground: "#8c2018", glow: "#ffa091" },
-  gold: { sky0: "#1d1a05", sky1: "#55480a", accent: "#ffd23f", accent2: "#a6ff6e", ground: "#7d6a10", glow: "#fff0a0" },
-  neon: { sky0: "#22061c", sky1: "#66104f", accent: "#ff2fa0", accent2: "#39e0ff", ground: "#8f1668", glow: "#ff9ad4" },
-  lime: { sky0: "#0a1d09", sky1: "#12521c", accent: "#5cf07a", accent2: "#d6ff54", ground: "#17722a", glow: "#a8ffb8" },
-  crimson: { sky0: "#1a0409", sky1: "#520a14", accent: "#ff2d4d", accent2: "#ff8a3d", ground: "#7d0f1e", glow: "#ff8a99" },
+  aqua: { sky0: "#03151c", sky1: "#0b3a44", accent: "#4fe3d0", accent2: "#ff5ec4", ground: "#0e5a63", glow: "#7ff5e6" },
+  cobalt: { sky0: "#040a1e", sky1: "#132a63", accent: "#5b8cff", accent2: "#ff9de0", ground: "#1b3a86", glow: "#a8c6ff" },
+  violet: { sky0: "#0e061d", sky1: "#331257", accent: "#a06bff", accent2: "#57f5d0", ground: "#4a1e80", glow: "#d3a9ff" },
+  magenta: { sky0: "#1a0616", sky1: "#5a1244", accent: "#ff5ec4", accent2: "#5ee0ff", ground: "#7d1c5c", glow: "#ffb3e8" },
+  amber: { sky0: "#170d04", sky1: "#5a3106", accent: "#ffa12e", accent2: "#5ee0ff", ground: "#8a4b0b", glow: "#ffd28a" },
+  ember: { sky0: "#190504", sky1: "#5e1410", accent: "#ff5a48", accent2: "#ffd166", ground: "#8c2018", glow: "#ffa091" },
+  gold: { sky0: "#151204", sky1: "#55480a", accent: "#ffd23f", accent2: "#6ee7ff", ground: "#7d6a10", glow: "#fff0a0" },
+  neon: { sky0: "#190415", sky1: "#66104f", accent: "#ff2fa0", accent2: "#39e0ff", ground: "#8f1668", glow: "#ff9ad4" },
+  lime: { sky0: "#061405", sky1: "#12521c", accent: "#5cf07a", accent2: "#ff8ae0", ground: "#17722a", glow: "#a8ffb8" },
+  crimson: { sky0: "#140306", sky1: "#520a14", accent: "#ff2d4d", accent2: "#ffb03a", ground: "#7d0f1e", glow: "#ff8a99" },
 };
 
 // -- 1. First Steps ---------------------------------------------------------
@@ -905,6 +914,14 @@ export function getLevel(def) {
     portals: raw.portals.slice().sort((p, q) => p.x - q.x),
     coins: raw.coins,
   };
+  // A ceiling is only *drawn* for levels that actually use it (flight modes,
+  // gravity flips, hanging blocks). Elsewhere it stays as an invisible lid so
+  // nothing can escape the world, and the sky is left open.
+  level.usesCeiling =
+    raw.portals.some((p) => p.kind === "grav" || (p.kind === "mode" && p.value !== "cube" && p.value !== "ball")) ||
+    raw.solids.some((s) => s.y <= CEIL_Y + 1) ||
+    raw.hazards.some((h) => h.dir === "down");
+
   level.allSolids = [...ceiling, ...floor, ...raw.solids];
   level.allSolids.sort((a, c) => a.x - c.x);
 

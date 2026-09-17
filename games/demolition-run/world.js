@@ -45,9 +45,9 @@ function createSky(scene) {
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      uTop: { value: new THREE.Color(0x05060f) },
-      uMid: { value: new THREE.Color(0x261043) },
-      uHorizon: { value: new THREE.Color(0x6e2450) },
+      uTop: { value: new THREE.Color(0x140b30) },
+      uMid: { value: new THREE.Color(0x1d0c36) },
+      uHorizon: { value: new THREE.Color(0x58203f) },
       uGlow: { value: new THREE.Color(0xff9a5c) },
     },
     vertexShader: `
@@ -63,15 +63,17 @@ function createSky(scene) {
         vec3 d = normalize(vPos);
         float h = clamp(d.y * 1.15 + 0.08, -1.0, 1.0);
         vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.34, h));
-        col = mix(col, uTop, smoothstep(0.28, 0.85, h));
+        col = mix(col, uTop, smoothstep(0.38, 1.05, h));
         // sun bloom sitting low, straight down the road
-        float sun = pow(max(0.0, dot(d, normalize(vec3(0.06, 0.05, 1.0)))), 40.0);
-        float haze = pow(max(0.0, dot(d, normalize(vec3(0.06, 0.02, 1.0)))), 5.0);
-        col += uGlow * (sun * 1.6 + haze * 0.30);
+        float sun = pow(max(0.0, dot(d, normalize(vec3(0.06, 0.05, 1.0)))), 90.0);
+        float haze = pow(max(0.0, dot(d, normalize(vec3(0.06, 0.02, 1.0)))), 16.0);
+        // keep the glow pinned to the horizon so it never bleaches the sky
+        float low = smoothstep(0.42, -0.05, h);
+        col += uGlow * (sun * 1.8 + haze * 0.75) * low;
         col = mix(col, uHorizon * 0.55, smoothstep(0.0, -0.25, h));
         // faint star field up high
-        float st = step(0.9992, fract(sin(dot(floor(d.xy * 260.0), vec2(12.9898, 78.233))) * 43758.5453));
-        col += vec3(st) * smoothstep(0.35, 0.9, h) * 0.8;
+        float st = step(0.9986, fract(sin(dot(floor(d.xy * 300.0), vec2(12.9898, 78.233))) * 43758.5453));
+        col += vec3(st) * smoothstep(0.18, 0.7, h) * 1.35;
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
@@ -163,7 +165,12 @@ function createSegmentMaterials() {
   const facade = createFacadeTextures();
 
   return {
-    road: new THREE.MeshPhongMaterial({ map: roadTex, shininess: 42, specular: 0x4a5a80, flatShading: false }),
+    road: new THREE.MeshPhongMaterial({
+      map: roadTex,
+      shininess: 48,
+      specular: 0x5a6a95,
+      emissive: 0x150e24,
+    }),
     walk: new THREE.MeshLambertMaterial({ map: walkTex }),
     kerb: new THREE.MeshLambertMaterial({ color: 0x45485a }),
     building: new THREE.MeshLambertMaterial({

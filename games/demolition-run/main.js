@@ -54,8 +54,8 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // ---------------------------------------------------------------- renderer
 const scene = new THREE.Scene();
-const FOG_COLOR = new THREE.Color(0x2a1740);
-scene.fog = new THREE.Fog(FOG_COLOR, 70, DRAW_DISTANCE);
+const FOG_COLOR = new THREE.Color(0x1d1130);
+scene.fog = new THREE.Fog(FOG_COLOR, 55, 250);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -67,11 +67,12 @@ camera.position.set(0, 4, -9.5);
 scene.add(camera);
 
 // Dusk key light from the low sun down the road, cool bounce from the sky.
-scene.add(new THREE.HemisphereLight(0x6f7dff, 0x241826, 1.15));
-const keyLight = new THREE.DirectionalLight(0xffb27a, 1.5);
+scene.add(new THREE.AmbientLight(0x4a3f7a, 0.55));
+scene.add(new THREE.HemisphereLight(0x8e9bff, 0x3a2438, 1.7));
+const keyLight = new THREE.DirectionalLight(0xffc08a, 2.1);
 keyLight.position.set(-24, 26, 52);
 scene.add(keyLight);
-const rimLight = new THREE.DirectionalLight(0xff4d8d, 0.8);
+const rimLight = new THREE.DirectionalLight(0xff4d8d, 1.1);
 rimLight.position.set(30, 14, -30);
 scene.add(rimLight);
 
@@ -79,15 +80,32 @@ scene.add(rimLight);
 let composer = null;
 let bloomPass = null;
 let bloomWanted = true;
+const forceBloom = new URLSearchParams(location.search).has("bloom");
 
 async function setupBloom() {
   try {
-    const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
-      import("three/addons/postprocessing/EffectComposer.js"),
-      import("three/addons/postprocessing/RenderPass.js"),
-      import("three/addons/postprocessing/UnrealBloomPass.js"),
-      import("three/addons/postprocessing/OutputPass.js"),
-    ]);
+    // Warm the addon graph one module at a time. Fetching the whole tree at
+    // once means a burst of parallel requests, which flaky mobile networks
+    // (and sandboxed proxies) drop; once cached, the real imports are free.
+    for (const path of [
+      "three/addons/shaders/CopyShader.js",
+      "three/addons/shaders/LuminosityHighPassShader.js",
+      "three/addons/shaders/OutputShader.js",
+      "three/addons/postprocessing/Pass.js",
+      "three/addons/postprocessing/ShaderPass.js",
+      "three/addons/postprocessing/MaskPass.js",
+    ]) {
+      try {
+        await import(/* @vite-ignore */ path);
+      } catch {
+        /* optional warm-up: the real import below reports any hard failure */
+      }
+    }
+
+    const { EffectComposer } = await import("three/addons/postprocessing/EffectComposer.js");
+    const { RenderPass } = await import("three/addons/postprocessing/RenderPass.js");
+    const { UnrealBloomPass } = await import("three/addons/postprocessing/UnrealBloomPass.js");
+    const { OutputPass } = await import("three/addons/postprocessing/OutputPass.js");
     const size = new THREE.Vector2(window.innerWidth, window.innerHeight);
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
@@ -123,7 +141,7 @@ camera.add(fx.windLines);
 
 let scoreState = createScoreState();
 let best = loadBest();
-bestValueEl.textContent = String(best);
+bestValueEl.textContent = best.toLocaleString();
 
 /** @type {"menu"|"playing"|"crashing"|"gameover"} */
 let state = "menu";
@@ -229,8 +247,10 @@ function popup(text, worldX, worldY, worldZ, cls = "") {
   const el = document.createElement("div");
   el.className = "pop " + cls;
   el.textContent = text;
-  el.style.left = ((_proj.x * 0.5 + 0.5) * 100).toFixed(2) + "%";
-  el.style.top = ((-_proj.y * 0.5 + 0.5) * 100).toFixed(2) + "%";
+  const px = Math.min(88, Math.max(12, (_proj.x * 0.5 + 0.5) * 100));
+  const py = Math.min(86, Math.max(16, (-_proj.y * 0.5 + 0.5) * 100));
+  el.style.left = px.toFixed(2) + "%";
+  el.style.top = py.toFixed(2) + "%";
   popupsEl.appendChild(el);
   setTimeout(() => el.remove(), 900);
 }
@@ -312,8 +332,12 @@ function onSmash(rec, force) {
   }
 }
 
+let lastNearMiss = 0;
 function onNearMiss(rec) {
   const pts = registerNearMiss(scoreState);
+  const t = performance.now();
+  if (t - lastNearMiss < 700) return;
+  lastNearMiss = t;
   popup("NEAR MISS +" + pts, rec.x, rec.y + 1.2, rec.z, "miss");
 }
 
@@ -341,6 +365,7 @@ function startRun() {
   brakeBtn.classList.remove("active");
   boostBtn.classList.remove("active");
   camera.position.set(0, 4, -9.5);
+  car.roadPool.visible = true;
   updateHud();
   state = "playing";
   loop.start();
@@ -374,7 +399,7 @@ function beginCrash() {
 function showGameOver() {
   state = "gameover";
   best = saveBestIfNeeded(scoreState.score, best);
-  bestValueEl.textContent = String(best);
+  bestValueEl.textContent = best.toLocaleString();
   $("final-score").textContent = scoreState.score.toLocaleString();
   $("final-distance").textContent = Math.round(car.distance) + "m";
   $("final-smashes").textContent = String(scoreState.smashes);
@@ -402,7 +427,7 @@ function update(rawDt) {
     if (perfAccum > 2.5) {
       perfChecked = true;
       const fps = frameCount / perfAccum;
-      if (fps < 42 && bloomPass) {
+      if (fps < 42 && bloomPass && !forceBloom) {
         bloomPass.enabled = false;
         bloomWanted = false;
         bloomToggle.checked = false;
@@ -507,14 +532,22 @@ let attractRaf = null;
 function attract(time) {
   if (state !== "menu") return;
   const t = time * 0.001;
-  camera.position.set(Math.sin(t * 0.18) * 3.5, 4.6 + Math.sin(t * 0.3) * 0.4, -10);
-  camera.lookAt(Math.sin(t * 0.18) * 1.2, 1.6, 22);
-  updateWorld(world, 1 / 60, 16, 0);
-  fx.update(1 / 60, 16 / 60);
+  // Slow 3/4 orbit down the lit street so the menu sits over the city, not a void.
+  camera.position.set(5.2 + Math.sin(t * 0.16) * 2.4, 2.6 + Math.sin(t * 0.26) * 0.3, -8.5);
+  camera.lookAt(0.4, 1.5, 20);
+  // The headlight pool is authored for the chase view; from this angle it
+  // reads as a flat smear, so the attract shot goes without it.
+  car.roadPool.visible = false;
+  updateWorld(world, 1 / 60, 22, 0);
+  fx.update(1 / 60, 22 / 60);
   car.wheelSpin += 0.4;
   for (const w of car.wheels) w.hub.rotation.x = car.wheelSpin;
   render();
   attractRaf = requestAnimationFrame(attract);
+}
+
+if (new URLSearchParams(location.search).has("debug")) {
+  window.__dr = { crash: () => beginCrash(), state: () => state };
 }
 
 setupBloom().then(() => {

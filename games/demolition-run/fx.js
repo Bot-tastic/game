@@ -109,7 +109,7 @@ export function createFX(scene) {
   for (let i = 0; i < SMOKE_CAP; i++) smokeState.push({ alive: false, p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0, maxLife: 1, size: 1, grow: 1, color: new THREE.Color() });
 
   // ---- wind lines: short additive streaks parented to the camera
-  const LINE_COUNT = 90;
+  const LINE_COUNT = 34;
   const linePos = new Float32Array(LINE_COUNT * 6);
   const lineGeo = new THREE.BufferGeometry();
   lineGeo.setAttribute("position", new THREE.BufferAttribute(linePos, 3));
@@ -125,7 +125,7 @@ export function createFX(scene) {
   lines.frustumCulled = false;
   const lineSeeds = [];
   for (let i = 0; i < LINE_COUNT; i++) {
-    lineSeeds.push({ a: Math.random() * Math.PI * 2, r: 2.5 + Math.random() * 9, z: -Math.random() * 60, speed: 0.7 + Math.random() * 0.8 });
+    lineSeeds.push({ a: Math.random() * Math.PI * 2, r: 8 + Math.random() * 9, z: -Math.random() * 60, speed: 0.7 + Math.random() * 0.8 });
   }
 
   function allocDebris() {
@@ -331,20 +331,20 @@ export function createFX(scene) {
 
   /** Wind streaks: only visible once you're genuinely moving fast. */
   function updateWindLines(dt, intensity) {
-    lineMat.opacity += (Math.max(0, intensity) * 0.55 - lineMat.opacity) * Math.min(1, dt * 6);
+    lineMat.opacity += (Math.max(0, intensity) * 0.13 - lineMat.opacity) * Math.min(1, dt * 6);
     if (lineMat.opacity < 0.01) {
       lines.visible = false;
       return;
     }
     lines.visible = true;
-    const len = 4 + intensity * 26;
+    const len = 2 + intensity * 12;
     for (let i = 0; i < LINE_COUNT; i++) {
       const s = lineSeeds[i];
       s.z += (30 + intensity * 190) * s.speed * dt;
       if (s.z > -1) {
         s.z = -58 - Math.random() * 14;
         s.a = Math.random() * Math.PI * 2;
-        s.r = 2.5 + Math.random() * 9;
+        s.r = 8 + Math.random() * 9;
       }
       const x = Math.cos(s.a) * s.r;
       const y = Math.sin(s.a) * s.r * 0.65;

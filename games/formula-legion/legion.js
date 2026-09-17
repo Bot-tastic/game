@@ -12,7 +12,7 @@ import {
 
 const STEER_SENSITIVITY = 0.022; // world units per CSS px of drag
 const LATERAL_EASE_RATE = 12;
-export const MAX_COUNT = 9999;
+export const MAX_COUNT = 9999999;
 
 export function createLegion() {
   return {

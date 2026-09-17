@@ -2,7 +2,7 @@
 // HUD, practice checkpoints, and the glue between input, physics, sound and FX.
 
 import { lockViewport, onPointer, loadHighScore, saveHighScore, createLoop, fitCanvasToScreen, showToast } from "../../shared/game-utils.js";
-import { LEVEL_DEFS, getLevel, storeKey, GROUND_Y, MODE_LABEL } from "./levels.js";
+import { LEVEL_DEFS, getLevel, storeKey, MODE_LABEL } from "./levels.js";
 import { createPlayer, createRun, step, HITBOX } from "./player.js";
 import { createRenderer } from "./render.js";
 import { createFx, updateFx, clearFx, burst, ring, shatter, shake, flash, hitStop, banner } from "./fx.js";
@@ -74,6 +74,18 @@ function recordBest(id, pct) {
 // Level select
 // ---------------------------------------------------------------------------
 
+const MODE_GLYPH = { cube: "◼", ship: "▲", ball: "●", wave: "◆", ufo: "⬭" };
+
+/** The gamemodes a level actually contains, in the order you meet them. */
+function modesIn(d) {
+  const lv = getLevel(d);
+  const out = ["cube"];
+  for (const p of lv.portals) {
+    if (p.kind === "mode" && p.value !== out[out.length - 1]) out.push(p.value);
+  }
+  return [...new Set(out)];
+}
+
 function renderLevelGrid() {
   levelGrid.innerHTML = "";
   for (const d of LEVEL_DEFS) {
@@ -90,6 +102,7 @@ function renderLevelGrid() {
       <span class="lv-name">${d.name}</span>
       <span class="lv-diff">${d.difficulty}</span>
       ${done ? '<span class="lv-crown">👑</span>' : ""}
+      <span class="lv-modes">${modesIn(d).map((m) => `<i title="${m}">${MODE_GLYPH[m]}</i>`).join("")}</span>
       <span class="lv-bar"><i style="width:${best}%"></i></span>
       <span class="lv-best">${done ? "COMPLETE" : best + "%"}</span>
     `;
@@ -474,7 +487,7 @@ function openPause() {
 
 function updatePracticeBtn() {
   const b = el("toggle-practice-btn");
-  b.textContent = "Practice: " + (practice ? "On" : "Off");
+  b.textContent = practice ? "Practice ✓" : "Practice";
   b.classList.toggle("is-on", practice);
 }
 
@@ -535,9 +548,34 @@ renderLevelGrid();
 if (location.search.includes("dev")) {
   window.__gdWarp = (frac) => {
     if (!level) return;
-    const trail = [];
     player = createPlayer(level, level.length * frac);
-    player.trail = trail;
+    player.trail = [];
+    // Drop into the first free lane at that x so flight sections can be
+    // screenshotted without spawning inside a corridor wall.
+    // Land in the middle of the widest free lane at that x, so tight flight
+    // corridors can be screenshotted without spawning inside a wall.
+    const hh = HITBOX[player.mode].hh + 6;
+    const free = (y) =>
+      level.allSolids.every(
+        (so) => player.x + 26 < so.x || player.x - 26 > so.x + so.w || y + hh < so.y || y - hh > so.y + so.h
+      );
+    let bestY = player.y;
+    let bestLen = -1;
+    let runStart = null;
+    for (let y = 10; y <= 295; y += 3) {
+      if (free(y)) {
+        if (runStart === null) runStart = y;
+      } else if (runStart !== null) {
+        if (y - runStart > bestLen) {
+          bestLen = y - runStart;
+          bestY = (runStart + y) / 2;
+        }
+        runStart = null;
+      }
+    }
+    if (runStart !== null && 295 - runStart > bestLen) bestY = (runStart + 295) / 2;
+    player.y = bestY;
+    player.grounded = false;
     showModeTag(player.mode);
   };
 }

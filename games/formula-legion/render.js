@@ -107,11 +107,17 @@ uniform vec3 bottom;
 uniform float time;
 varying vec3 vPos;
 void main() {
-  float h = clamp(normalize(vPos).y * 0.5 + 0.5, 0.0, 1.0);
-  vec3 col = mix(bottom, top, pow(h, 0.72));
-  // soft moving bands near the horizon for a sense of drift
-  float band = sin(vPos.x * 0.008 + time * 0.06) * cos(vPos.z * 0.006 - time * 0.04);
-  col += bottom * band * 0.09 * (1.0 - h);
+  vec3 dir = normalize(vPos);
+  // The horizon (dir.y == 0) must land on the bottom colour, not halfway up
+  // the ramp, or all the player ever sees is the dark zenith colour.
+  float h = clamp(dir.y, 0.0, 1.0);
+  vec3 col = mix(bottom, top, pow(h, 0.55));
+  // warm glow hugging the horizon line
+  float glow = pow(1.0 - clamp(abs(dir.y) * 3.2, 0.0, 1.0), 2.0);
+  col += bottom * glow * 0.55;
+  // soft moving bands for a sense of drift
+  float band = sin(dir.x * 6.0 + time * 0.25) * cos(dir.z * 5.0 - time * 0.18);
+  col += bottom * band * 0.06 * (1.0 - h);
   gl_FragColor = vec4(col, 1.0);
 }`;
 

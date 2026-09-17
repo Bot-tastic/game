@@ -5,11 +5,19 @@
 import { RANGE, HIT_RADIUS, COIN_RADIUS, applyGateOp, rollRisk, GOOD_KINDS } from "./levels.js";
 import { dps, hasPerk, MAX_COUNT } from "./legion.js";
 
-const LEVEL_CLEAR_BONUS = 4;
-const COIN_SCORE = 25;
+// Score is deliberately NOT tied to raw dps: headcount grows exponentially in
+// this genre, and a score in the tens of millions stops meaning anything.
+// Points come from things the player actually did — walls broken, coins taken,
+// levels survived — weighted by how deep the run got.
+const WALL_SCORE = 120;
+const BOSS_MULT = 5;
+const LEVEL_CLEAR_SCORE = 400;
+const COIN_SCORE = 20;
 const BOSS_SHOT_SPEED = 22;
 const BOSS_SHOT_INTERVAL = 1.5;
 const BOSS_SHOT_RADIUS = 1.1;
+// Fraction of a wall left standing at impact that counts as a total overrun.
+const WIPE_THRESHOLD = 0.75;
 
 /** Index of the nearest still-alive column to x within HIT_RADIUS, or -1. */
 function nearestColumn(ev, x) {
@@ -65,7 +73,13 @@ function emit(run, e) {
   run.events.push(e);
 }
 
-function loseUnits(run, amount, reason) {
+/**
+ * Take a loss. `survivable` losses always leave at least one trooper alive:
+ * only a wall the legion barely scratched (see stepWall) can actually end a
+ * run, so a wipe always traces back to a gate the player misread rather than
+ * to accumulated chip damage.
+ */
+function loseUnits(run, amount, reason, survivable = true) {
   const legion = run.legion;
   if (legion.shields > 0) {
     legion.shields--;
@@ -73,8 +87,11 @@ function loseUnits(run, amount, reason) {
     return;
   }
   let lost = Math.max(1, Math.round(amount));
-  if (hasPerk(legion, "salvage")) lost = Math.max(1, Math.round(lost * 0.65));
-  lost = Math.min(lost, legion.count);
+  // Salvage softens ordinary losses but cannot save a legion that was run
+  // over outright — otherwise no run would ever actually end.
+  if (survivable && hasPerk(legion, "salvage")) lost = Math.max(1, Math.round(lost * 0.65));
+  lost = Math.min(lost, survivable ? legion.count - 1 : legion.count);
+  if (lost <= 0) return;
   legion.count -= lost;
   emit(run, { type: "lost", n: lost, reason });
   if (legion.count <= 0) {
@@ -149,7 +166,7 @@ function stepWall(run, ev, dt) {
         emit(run, { type: "columnDown", col: target, ev, x: ev.colX[target], z: ev.z });
         if (ev.colHp.every((hp) => hp <= 0)) {
           ev.cleared = true;
-          run.score += Math.round(ev.maxHp * (ev.boss ? 2 : 1));
+          run.score += WALL_SCORE * run.level.id * (ev.boss ? BOSS_MULT : 1);
           if (hasPerk(legion, "momentum")) {
             legion.count = Math.min(MAX_COUNT, Math.round(legion.count * 1.08) + 1);
           }
@@ -164,7 +181,17 @@ function stepWall(run, ev, dt) {
     if (!ev.cleared) {
       const remaining = ev.colHp.reduce((s, h) => s + h, 0) / ev.maxHp;
       emit(run, { type: "crash", z: ev.z, boss: ev.boss });
-      loseUnits(run, legion.count * 0.42 * remaining + ev.cols, "wall");
+      // Readable, dramatic rule: a wall you barely scratched runs the legion
+      // over completely (a shield still eats it whole). Anything you got
+      // meaningfully into only costs troops, and never your last one — so a
+      // wipe always traces back to arriving at a wall you had no business
+      // meeting, which the incoming-wall warning told you about in advance.
+      // Level 1 is where the player learns that fire only lands on the column
+      // they are lined up with; ending that lesson with a score-0 run teaches
+      // nothing, so the first level always leaves a survivor to rebuild from.
+      const fatal = remaining >= WIPE_THRESHOLD && run.level.id > 1;
+      if (fatal) loseUnits(run, legion.count, "wall", false);
+      else loseUnits(run, legion.count * (0.25 + 0.5 * remaining) + ev.cols, "wall", true);
     }
   }
 }
@@ -175,7 +202,7 @@ function stepCoins(run, ev) {
     if (item.taken || item.z > run.playerZ) continue;
     item.taken = true;
     if (Math.abs(item.x - legion.x) <= COIN_RADIUS) {
-      const worth = COIN_SCORE * (hasPerk(legion, "scavenge") ? 3 : 1);
+      const worth = COIN_SCORE * run.level.id * (hasPerk(legion, "scavenge") ? 3 : 1);
       run.score += worth;
       legion.coins++;
       emit(run, { type: "coin", x: item.x, z: item.z, worth });
@@ -202,6 +229,6 @@ export function stepRun(run, dt) {
 
   if (!run.dead && run.playerZ >= run.level.length) {
     run.finished = true;
-    run.score += Math.round(dps(run.legion) * LEVEL_CLEAR_BONUS);
+    run.score += LEVEL_CLEAR_SCORE * run.level.id;
   }
 }
