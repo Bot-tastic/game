@@ -94,20 +94,21 @@ export function createLevelVisuals(scene, level) {
       const waveGroup = new THREE.Group();
       waveGroup.position.set(0, 0, ev.z);
       const mat = new THREE.MeshLambertMaterial({ color: 0xff3b4a, flatShading: true });
-      const dummies = [];
-      const spanW = LANE_HALF_WIDTH * 1.7;
+      // One dummy array per column (ev.colX[c]) so column HP can drive that
+      // column's dummies independently — the whole point of columns is that
+      // clearing one doesn't touch the others.
+      const colDummies = ev.colX.map(() => []);
       for (let r = 0; r < ev.rows; r++) {
         for (let c = 0; c < ev.cols; c++) {
           const dummy = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.4, 0.55), mat);
-          const fx = ev.cols === 1 ? 0 : (c / (ev.cols - 1)) * 2 - 1;
-          dummy.position.set(fx * spanW, 0.7, r * 0.9);
+          dummy.position.set(ev.colX[c], 0.7, r * 0.9);
           waveGroup.add(dummy);
-          dummies.push(dummy);
+          colDummies[c].push(dummy);
         }
       }
       group.add(waveGroup);
       ev._mesh = waveGroup;
-      ev._dummies = dummies;
+      ev._colDummies = colDummies;
     }
   }
 
@@ -138,12 +139,16 @@ export function updateLevelVisuals(level, playerZ) {
   }
 }
 
+/** Hide a column's dummies proportionally to its own remaining HP —
+ * columns clear independently, so this must never look at the wave total. */
 export function updateWaveDummies(ev) {
-  if (!ev._dummies) return;
-  const remaining = ev.maxHp > 0 ? Math.max(0, ev.hp / ev.maxHp) : 0;
-  const visibleCount = ev.cleared ? 0 : Math.max(1, Math.round(remaining * ev._dummies.length));
-  for (let i = 0; i < ev._dummies.length; i++) {
-    ev._dummies[i].visible = i < visibleCount;
+  if (!ev._colDummies) return;
+  for (let c = 0; c < ev._colDummies.length; c++) {
+    const dummies = ev._colDummies[c];
+    const colMax = ev.hpEach * ev.rows;
+    const remaining = colMax > 0 ? Math.max(0, ev.colHp[c] / colMax) : 0;
+    const visibleCount = ev.colHp[c] <= 0 ? 0 : Math.max(1, Math.round(remaining * dummies.length));
+    for (let i = 0; i < dummies.length; i++) dummies[i].visible = i < visibleCount;
   }
 }
 
@@ -194,6 +199,60 @@ export function updateLegionCrowd(crowd, legion, playerZ) {
   }
   crowd.bodies.instanceMatrix.needsUpdate = true;
   crowd.heads.instanceMatrix.needsUpdate = true;
+}
+
+const BULLET_TRAVEL_TIME = 0.12; // seconds for a tracer to cross from muzzle to target
+const _bulletDummy = new THREE.Object3D();
+
+/** Pool of tracer "bullets" so shooting is actually visible. Cheap: one
+ * InstancedMesh, round-robin reuse, no per-bullet allocation after setup. */
+export function createBulletPool(scene, capacity = 24) {
+  const geo = new THREE.SphereGeometry(0.09, 6, 6);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xfff2a0 });
+  const mesh = new THREE.InstancedMesh(geo, mat, capacity);
+  mesh.frustumCulled = false; // same InstancedMesh culling gotcha as the legion crowd
+  mesh.count = capacity;
+  scene.add(mesh);
+
+  const bullets = [];
+  for (let i = 0; i < capacity; i++) {
+    bullets.push({ active: false, t: 0, from: new THREE.Vector3(), to: new THREE.Vector3() });
+    _bulletDummy.position.set(0, -1000, 0);
+    _bulletDummy.scale.set(0, 0, 0);
+    _bulletDummy.updateMatrix();
+    mesh.setMatrixAt(i, _bulletDummy.matrix);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  return { mesh, bullets, cursor: 0 };
+}
+
+/** Fire one tracer from `fromVec3` to `toVec3` (both THREE.Vector3-likes). */
+export function spawnBullet(pool, fromVec3, toVec3) {
+  const b = pool.bullets[pool.cursor];
+  pool.cursor = (pool.cursor + 1) % pool.bullets.length;
+  b.active = true;
+  b.t = 0;
+  b.from.copy(fromVec3);
+  b.to.copy(toVec3);
+}
+
+export function updateBullets(pool, dt) {
+  for (let i = 0; i < pool.bullets.length; i++) {
+    const b = pool.bullets[i];
+    if (!b.active) continue;
+    b.t += dt / BULLET_TRAVEL_TIME;
+    if (b.t >= 1) {
+      b.active = false;
+      _bulletDummy.position.set(0, -1000, 0);
+      _bulletDummy.scale.set(0, 0, 0);
+    } else {
+      _bulletDummy.position.lerpVectors(b.from, b.to, b.t);
+      _bulletDummy.scale.set(1, 1, 1);
+    }
+    _bulletDummy.updateMatrix();
+    pool.mesh.setMatrixAt(i, _bulletDummy.matrix);
+  }
+  pool.mesh.instanceMatrix.needsUpdate = true;
 }
 
 /** Damped third-person chase camera following the legion, framed low and
