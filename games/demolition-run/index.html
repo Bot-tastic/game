@@ -3,16 +3,24 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0b0d12" />
   <title>Demolition Run</title>
   <link rel="stylesheet" href="../../shared/theme.css" />
   <link rel="stylesheet" href="../../shared/components.css" />
   <link rel="stylesheet" href="./style.css" />
   <script type="importmap">
-  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
   </script>
 </head>
 <body class="game-page">
   <canvas id="game"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="flash" id="flash" aria-hidden="true"></div>
 
   <header class="hud safe-area">
     <a class="hud-back" href="../../index.html">&larr; Games</a>
@@ -27,34 +35,80 @@
       </div>
       <div class="hud-score">
         <span class="label">Dist</span>
-        <span class="value" id="dist-value">0</span>
+        <span class="value" id="dist-value">0<small>m</small></span>
       </div>
     </div>
   </header>
 
-  <div class="damage-meter" aria-label="Damage" id="damage-meter-slot">
-    <div class="damage-meter-fill" id="damage-fill"></div>
+  <button class="icon-btn" id="mute-btn" aria-label="Toggle sound">&#9834;</button>
+
+  <div class="combo" id="combo" aria-hidden="true">
+    <div class="combo-x" id="combo-x">x1</div>
+    <div class="combo-label" id="combo-label">COMBO</div>
+    <div class="combo-bar"><i id="combo-bar-fill"></i></div>
   </div>
 
-  <section class="overlay" id="menu-overlay">
-    <h1>Demolition Run</h1>
-    <p class="stat">Drag anywhere to steer. Hold BRAKE to slow down. Smash everything &mdash; don't total your car.</p>
-    <div class="actions">
-      <button class="btn btn--primary" id="start-btn">Start</button>
+  <div class="rampage" id="rampage" aria-hidden="true">RAMPAGE</div>
+
+  <div class="popups" id="popups" aria-hidden="true"></div>
+
+  <div class="gauges safe-area">
+    <div class="gauge gauge--hull">
+      <span class="gauge-label">Hull</span>
+      <div class="gauge-track"><i id="damage-fill"></i></div>
+    </div>
+    <div class="gauge gauge--boost">
+      <span class="gauge-label">Boost</span>
+      <div class="gauge-track"><i id="boost-fill"></i></div>
+    </div>
+    <div class="speedo"><span id="speed-value">0</span><small>km/h</small></div>
+  </div>
+
+  <div class="controls safe-area" id="controls" hidden>
+    <button class="pad pad--brake" id="brake-btn">BRAKE</button>
+    <button class="pad pad--boost" id="boost-btn">BOOST</button>
+  </div>
+
+  <section class="overlay overlay--menu" id="menu-overlay">
+    <div class="panel">
+      <p class="eyebrow">Neon District &mdash; Night Shift</p>
+      <h1 class="title">Demolition<span>Run</span></h1>
+      <p class="tagline">Chain the wreckage. Keep the multiplier alive. Don't total the car.</p>
+
+      <ul class="controls-list">
+        <li><b>Drag</b><span>Steer &mdash; lean in to drift</span></li>
+        <li><b>Boost</b><span>Burn fuel for speed &amp; damage</span></li>
+        <li><b>Brake</b><span>Tighten the line</span></li>
+        <li><b>Keys</b><span>&#8592;&#8594; / A D &nbsp;&middot;&nbsp; Space &nbsp;&middot;&nbsp; S</span></li>
+      </ul>
+
+      <div class="actions">
+        <button class="btn btn--primary" id="start-btn">Start Engine</button>
+      </div>
+      <label class="toggle"><input type="checkbox" id="bloom-toggle" checked /> <span>Neon bloom</span></label>
     </div>
   </section>
 
-  <section class="overlay" id="gameover-overlay" hidden>
-    <h2>Wrecked</h2>
-    <p class="stat">Score <strong id="final-score">0</strong></p>
-    <p class="stat">Distance <strong id="final-distance">0</strong></p>
-    <p class="stat">Best <strong id="final-best">0</strong></p>
-    <div class="actions">
-      <button class="btn btn--primary" id="retry-btn">Retry</button>
+  <section class="overlay overlay--over" id="gameover-overlay" hidden>
+    <div class="panel">
+      <p class="eyebrow eyebrow--warn">Run terminated</p>
+      <h2 class="title title--over">Wrecked</h2>
+      <div class="score-hero"><span id="final-score">0</span></div>
+      <div class="result-grid">
+        <div><b id="final-distance">0</b><span>Distance</span></div>
+        <div><b id="final-smashes">0</b><span>Smashes</span></div>
+        <div><b id="final-combo">0</b><span>Best combo</span></div>
+        <div><b id="final-best">0</b><span>Best score</span></div>
+      </div>
+      <p class="verdict" id="verdict"></p>
+      <div class="actions">
+        <button class="btn btn--primary" id="retry-btn">Run It Back</button>
+        <a class="btn btn--ghost" href="../../index.html">Games</a>
+      </div>
     </div>
   </section>
 
-  <button class="btn btn--ghost" id="brake-btn">BRAKE</button>
+  <div class="toast" id="toast" aria-live="polite"></div>
 
   <script type="module" src="./main.js"></script>
 </body>

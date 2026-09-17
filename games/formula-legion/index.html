@@ -8,58 +8,106 @@
   <link rel="stylesheet" href="../../shared/components.css" />
   <link rel="stylesheet" href="./style.css" />
   <script type="importmap">
-  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
   </script>
 </head>
 <body class="game-page">
   <canvas id="game"></canvas>
 
+  <div class="progress-bar">
+    <div class="progress-fill" id="progress-fill"></div>
+  </div>
+
   <header class="hud safe-area">
-    <a class="hud-back" href="../../index.html">&larr; Games</a>
-    <div class="hud-scores">
-      <div class="hud-score">
-        <span class="label">Legion</span>
-        <span class="value" id="count-value">1</span>
-      </div>
-      <div class="hud-score">
-        <span class="label">Score</span>
-        <span class="value" id="score-value">0</span>
-      </div>
-      <div class="hud-score">
-        <span class="label">Best</span>
-        <span class="value" id="best-value">0</span>
-      </div>
-      <div class="hud-score">
-        <span class="label">Level</span>
-        <span class="value" id="level-value">1</span>
+    <div class="hud-left">
+      <a class="hud-back" href="../../index.html">&larr; Games</a>
+      <button class="icon-btn" id="mute-btn" aria-label="Toggle sound">&#9834;</button>
+    </div>
+    <div class="hud-right">
+      <div class="level-pill"><span id="level-value">1</span><em id="theme-name">Neon Verge</em></div>
+      <div class="hud-scores">
+        <div class="hud-score">
+          <span class="label">Score</span>
+          <span class="value" id="score-value">0</span>
+        </div>
+        <div class="hud-score">
+          <span class="label">Best</span>
+          <span class="value" id="best-value">0</span>
+        </div>
       </div>
     </div>
   </header>
 
-  <div class="progress-bar" id="progress-slot">
-    <div class="progress-fill" id="progress-fill"></div>
+  <div class="army-panel" id="army-panel">
+    <div class="army-count"><span class="glyph">&#9823;</span><span id="count-value">6</span></div>
+    <div class="army-meta">
+      <span class="tier-badge" id="tier-badge">MK1 RIFLE</span>
+      <span class="shield-badge" id="shield-badge" hidden>&#10022; <em id="shield-value">0</em></span>
+    </div>
+  </div>
+
+  <div class="warn-banner" id="warn-banner" hidden>
+    <span class="warn-title">INCOMING WALL</span>
+    <span class="warn-sub" id="warn-sub">HP 0</span>
   </div>
 
   <div class="toast" id="toast"></div>
 
-  <section class="overlay" id="menu-overlay">
-    <h1>Formula Legion</h1>
-    <p class="stat">Your legion walks forward and fires on its own — but it only hits whatever's straight ahead of it, so steer to line up on enemies. Every gate splits in two &mdash; drag left or right to pick which math operation hits your headcount or gun. Clearing a level banks a reward based on how big and strong your army is at that moment. Endless levels, each harder than the last.</p>
-    <p class="stat">Record army power ever reached: <strong id="menu-best-power">0</strong></p>
-    <div class="actions">
-      <button class="btn btn--primary" id="start-btn">Start</button>
+  <section class="overlay panel-overlay" id="menu-overlay">
+    <div class="panel">
+      <div class="title-block">
+        <p class="kicker">Crowd Runner</p>
+        <h1>Formula<span>Legion</span></h1>
+      </div>
+      <p class="blurb">Steer your legion down the track. Every gate forks &mdash; drag left or right to pick the
+        side that grows your army, sharpens your guns or shields you. Shatter the enemy walls before they
+        reach you, then take a perk and push deeper.</p>
+      <ul class="legend">
+        <li><b class="c-good">+ &times;</b> more troops</li>
+        <li><b class="c-bad">&minus; &divide;</b> fewer troops</li>
+        <li><b class="c-tier">TIER</b> stronger guns</li>
+        <li><b class="c-risk">?</b> gamble</li>
+      </ul>
+      <div class="records">
+        <div><span>Best score</span><strong id="menu-best">0</strong></div>
+        <div><span>Deepest level</span><strong id="menu-depth">1</strong></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn--primary" id="start-btn">Start Run</button>
+      </div>
+      <button class="link-btn" id="quality-btn">Effects: High</button>
     </div>
   </section>
 
-  <section class="overlay" id="gameover-overlay" hidden>
-    <h2>Legion Wiped</h2>
-    <p class="stat">Reached level <strong id="final-level">1</strong></p>
-    <p class="stat">Score <strong id="final-score">0</strong></p>
-    <p class="stat">Best <strong id="final-best">0</strong></p>
-    <p class="stat">Army power this run <strong id="final-power">0</strong></p>
-    <p class="stat">Record army power <strong id="final-best-power">0</strong></p>
-    <div class="actions">
-      <button class="btn btn--primary" id="retry-btn">Retry</button>
+  <section class="overlay panel-overlay" id="perk-overlay" hidden>
+    <div class="panel">
+      <p class="kicker">Level <span id="perk-level">1</span> cleared</p>
+      <h2>Choose an upgrade</h2>
+      <p class="blurb small" id="perk-summary">+0 score banked</p>
+      <div class="perk-grid" id="perk-grid"></div>
+    </div>
+  </section>
+
+  <section class="overlay panel-overlay" id="gameover-overlay" hidden>
+    <div class="panel">
+      <p class="kicker">Run over</p>
+      <h2>Legion Wiped</h2>
+      <div class="records big">
+        <div><span>Level reached</span><strong id="final-level">1</strong></div>
+        <div><span>Score</span><strong id="final-score">0</strong></div>
+        <div><span>Best</span><strong id="final-best">0</strong></div>
+        <div><span>Peak legion</span><strong id="final-peak">0</strong></div>
+      </div>
+      <div class="perk-summary" id="final-perks"></div>
+      <div class="actions">
+        <button class="btn btn--primary" id="retry-btn">Run Again</button>
+        <a class="btn btn--ghost" href="../../index.html">Quit</a>
+      </div>
     </div>
   </section>
 
