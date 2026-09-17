@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Formula Legion</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+  </script>
+</head>
+<body class="game-page">
+  <canvas id="game"></canvas>
+
+  <header class="hud safe-area">
+    <a class="hud-back" href="../../index.html">&larr; Games</a>
+    <div class="hud-scores">
+      <div class="hud-score">
+        <span class="label">Legion</span>
+        <span class="value" id="count-value">1</span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Score</span>
+        <span class="value" id="score-value">0</span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Best</span>
+        <span class="value" id="best-value">0</span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Level</span>
+        <span class="value" id="level-value">1</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="progress-bar" id="progress-slot">
+    <div class="progress-fill" id="progress-fill"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <section class="overlay" id="menu-overlay">
+    <h1>Formula Legion</h1>
+    <p class="stat">Your legion walks forward and fires on its own. Drag left/right to steer through math gates &mdash; +/&minus;/&times;/&divide; change your headcount, RATE/DMG gates change your gun. Clear enemy walls before they reach you. Endless levels, each harder than the last.</p>
+    <div class="actions">
+      <button class="btn btn--primary" id="start-btn">Start</button>
+    </div>
+  </section>
+
+  <section class="overlay" id="gameover-overlay" hidden>
+    <h2>Legion Wiped</h2>
+    <p class="stat">Reached level <strong id="final-level">1</strong></p>
+    <p class="stat">Score <strong id="final-score">0</strong></p>
+    <p class="stat">Best <strong id="final-best">0</strong></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="retry-btn">Retry</button>
+    </div>
+  </section>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
