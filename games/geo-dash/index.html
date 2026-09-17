@@ -6,54 +6,99 @@
   <title>Geo Dash</title>
   <link rel="stylesheet" href="../../shared/theme.css" />
   <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body class="game-page">
   <canvas id="game"></canvas>
 
-  <header class="hud safe-area">
+  <header class="hud safe-area" id="hud">
     <a class="hud-back" href="../../index.html">&larr; Games</a>
-    <div class="hud-scores">
-      <div class="hud-score">
-        <span class="label">Progress</span>
-        <span class="value" id="progress-value">0%</span>
-      </div>
-      <div class="hud-score">
-        <span class="label">Mode</span>
-        <span class="value" id="mode-value">—</span>
-      </div>
-      <div class="hud-score">
-        <span class="label">Try</span>
-        <span class="value" id="attempt-value">0</span>
-      </div>
+    <div class="hud-right">
+      <div class="hud-chip" id="attempt-chip"><span class="k">Attempt</span><span class="v" id="attempt-value">1</span></div>
+      <div class="hud-chip" id="coin-chip"><span class="k">Coins</span><span class="v" id="coin-value">0</span></div>
+      <button class="icon-btn" id="pause-btn" aria-label="Pause">II</button>
     </div>
   </header>
 
-  <div id="mode-hint" class="mode-hint" hidden></div>
+  <div class="progress-wrap" id="progress-wrap" hidden>
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill"></div>
+      <div class="progress-best" id="progress-best"></div>
+    </div>
+    <div class="progress-num" id="progress-num">0%</div>
+  </div>
 
-  <section class="overlay" id="levelselect-overlay">
-    <h2>Geo Dash</h2>
-    <p class="subtitle">Tap/hold to control. Reach the end without crashing.</p>
+  <div class="mode-tag" id="mode-tag" hidden></div>
+  <div class="toast" id="toast"></div>
+
+  <!-- Level select ------------------------------------------------------ -->
+  <section class="overlay overlay--menu" id="menu-overlay">
+    <div class="menu-head">
+      <h1 class="logo">GEO<span>DASH</span></h1>
+      <p class="tagline">Tap in time. Don't blink.</p>
+      <button class="icon-btn icon-btn--lg" id="mute-btn" aria-label="Toggle sound">♪</button>
+    </div>
     <div class="level-grid" id="level-grid"></div>
+    <p class="hint">Tap or press <kbd>Space</kbd> to jump · hold in ship &amp; wave</p>
   </section>
 
-  <section class="overlay" id="gameover-overlay" hidden>
-    <h2>Crashed!</h2>
-    <p class="stat">Progress <strong id="final-progress">0%</strong></p>
-    <p class="stat">Best <strong id="final-best">0%</strong></p>
-    <p class="stat">Attempt <strong id="final-attempt">0</strong></p>
-    <div class="actions">
-      <button class="btn btn--primary" id="retry-btn">Retry</button>
-      <button class="btn btn--ghost" id="back-btn">Levels</button>
+  <!-- Level detail ------------------------------------------------------ -->
+  <section class="overlay overlay--sheet" id="detail-overlay" hidden>
+    <div class="sheet" id="detail-sheet">
+      <div class="sheet-head">
+        <span class="diff-pill" id="detail-diff">Easy</span>
+        <h2 id="detail-name">Level</h2>
+        <div class="stars" id="detail-stars"></div>
+      </div>
+      <div class="sheet-stats">
+        <div><span class="k">Best</span><span class="v" id="detail-best">0%</span></div>
+        <div><span class="k">Attempts</span><span class="v" id="detail-attempts">0</span></div>
+        <div><span class="k">Coins</span><span class="v" id="detail-coins">0</span></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn--primary" id="play-btn">Play</button>
+        <button class="btn btn--practice" id="practice-btn">Practice</button>
+      </div>
+      <button class="btn btn--ghost" id="detail-back">Back</button>
     </div>
   </section>
 
-  <section class="overlay" id="win-overlay" hidden>
-    <h2>Level Complete!</h2>
-    <p class="stat">Attempts <strong id="win-attempts">0</strong></p>
-    <div class="actions">
-      <button class="btn btn--primary" id="next-btn">Next Level</button>
-      <button class="btn btn--ghost" id="win-back-btn">Levels</button>
+  <!-- Pause ------------------------------------------------------------- -->
+  <section class="overlay overlay--sheet" id="pause-overlay" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><h2 id="pause-name">Paused</h2></div>
+      <div class="sheet-stats">
+        <div><span class="k">Progress</span><span class="v" id="pause-progress">0%</span></div>
+        <div><span class="k">Best</span><span class="v" id="pause-best">0%</span></div>
+        <div><span class="k">Attempts</span><span class="v" id="pause-attempts">0</span></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn--primary" id="resume-btn">Resume</button>
+        <button class="btn btn--ghost" id="restart-btn">Restart</button>
+      </div>
+      <div class="actions">
+        <button class="btn btn--practice" id="toggle-practice-btn">Practice: Off</button>
+        <button class="btn btn--ghost" id="quit-btn">Levels</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Win --------------------------------------------------------------- -->
+  <section class="overlay overlay--sheet" id="win-overlay" hidden>
+    <div class="sheet sheet--win">
+      <div class="sheet-head"><h2 class="win-title">LEVEL COMPLETE</h2></div>
+      <div class="sheet-stats">
+        <div><span class="k">Attempts</span><span class="v" id="win-attempts">0</span></div>
+        <div><span class="k">Coins</span><span class="v" id="win-coins">0</span></div>
+        <div><span class="k">Mode</span><span class="v" id="win-mode">Normal</span></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn--primary" id="next-btn">Next Level</button>
+        <button class="btn btn--ghost" id="win-back-btn">Levels</button>
+      </div>
     </div>
   </section>
 

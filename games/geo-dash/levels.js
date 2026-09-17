@@ -1,202 +1,954 @@
-// levels.js — level definitions + deterministic seeded level generation for
-// Geo Dash. No live browser is available to hand-tune pixel-perfect levels,
-// so every level is built procedurally from a small numeric difficulty
-// profile + a fixed seed (same mulberry32 PRNG pattern as demolition-run's
-// world.js), which keeps every run of a given level byte-identical and lets
-// fairness be reasoned about in code instead of by playtesting.
+// levels.js — world constants, the level-authoring builder, and the ten
+// hand-authored levels. Pure data + math: no DOM, so the fairness checker in
+// tools/verify-levels.mjs can import it under node.
 //
-// World units: everything (positions, sizes, speeds) is expressed in a
-// resolution-independent "world unit" space, WORLD_HEIGHT tall. main.js
-// scales world units to CSS pixels by a single factor S = canvasHeight /
-// WORLD_HEIGHT, so physics constants never need to change per device.
+// World units: a resolution-independent space. The playfield band runs from
+// CEIL_Y (0) down to GROUND_Y (300); render.js maps it to CSS pixels with a
+// single scale factor. TILE (30) is the size of the cube and of every block,
+// so everything snaps to a readable grid.
 
-export const WORLD_HEIGHT = 400;
-export const GROUND_Y = 320; // baseline floor for cube/robot/ufo segments
-export const BLOCK_HEIGHT = 40;
+export const TILE = 30;
+export const GROUND_Y = 300;
+export const CEIL_Y = 0;
+export const VIEW_TOP = -70; // world Y at the top of the drawn band
+export const VIEW_BOTTOM = 380; // world Y at the bottom of the drawn band
+export const VIEW_W = 340; // minimum world units visible horizontally
 
-// Ground modes (cube/robot/ufo) all walk a single floor height-map + a
-// separate hazard (spike) list. Ship is the only free-flight mode, using a
-// floor/ceiling tunnel instead. This mirrors real Geometry Dash, where cube/
-// ball/robot/ufo/wave are all "ground" modes and ship is the odd one out.
-export const GROUND_MODES = ["cube", "robot", "ufo"];
+export const MODES = ["cube", "ship", "ball", "wave", "ufo"];
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+export const MODE_LABEL = {
+  cube: "CUBE — tap to jump",
+  ship: "SHIP — hold to fly up",
+  ball: "BALL — tap to flip gravity",
+  wave: "WAVE — hold to climb",
+  ufo: "UFO — tap to flap",
+};
+
+// ---------------------------------------------------------------------------
+// Builder
+// ---------------------------------------------------------------------------
+
+// Every authored level is written as a stream of cursor moves (`go`, in beats)
+// and placements (which never move the cursor). Authoring in beats instead of
+// world units is what keeps the obstacles landing on the music: one beat of
+// runway is always one beat of runway, whatever the level's speed.
+function makeBuilder(def) {
+  const level = {
+    solids: [],
+    hazards: [],
+    pads: [],
+    orbs: [],
+    portals: [],
+    coins: [],
+    pits: [],
+    length: 0,
   };
+
+  let x = 0;
+  let speed = def.speed;
+  let beat = (speed * 60) / def.bpm;
+
+  const b = {
+    get x() {
+      return x;
+    },
+    get beat() {
+      return beat;
+    },
+    /** Advance the cursor by `beats` of empty runway. */
+    go(beats) {
+      x += beats * beat;
+      return b;
+    },
+    /** A row of `n` ground spikes starting at the cursor. */
+    spikes(n = 1, opts = {}) {
+      const base = opts.y != null ? opts.y : GROUND_Y;
+      for (let i = 0; i < n; i++) {
+        level.hazards.push({ type: "spike", dir: "up", x: x + i * TILE, y: base, w: TILE, h: TILE * 0.8 });
+      }
+      return b;
+    },
+    /** A row of `n` spikes hanging from the ceiling (or from `y`). */
+    spikesDown(n = 1, opts = {}) {
+      const base = opts.y != null ? opts.y : CEIL_Y;
+      for (let i = 0; i < n; i++) {
+        level.hazards.push({ type: "spike", dir: "down", x: x + i * TILE, y: base, w: TILE, h: TILE * 0.8 });
+      }
+      return b;
+    },
+    /** Solid block resting on the ground: `w` tiles wide, `h` tiles tall. */
+    blk(w = 1, h = 1, opts = {}) {
+      level.solids.push({
+        x,
+        y: GROUND_Y - h * TILE,
+        w: w * TILE,
+        h: h * TILE,
+        style: opts.style || "block",
+      });
+      return b;
+    },
+    /** Solid block hanging from the ceiling, `h` tiles deep. */
+    blkTop(w = 1, h = 1) {
+      level.solids.push({ x, y: CEIL_Y, w: w * TILE, h: h * TILE, style: "block" });
+      return b;
+    },
+    /** Thin floating platform, top surface `up` tiles above the ground. */
+    plat(w = 2, up = 2, opts = {}) {
+      const s = { x, y: GROUND_Y - up * TILE, w: w * TILE, h: 14, style: "plat" };
+      if (opts.move) s.move = opts.move;
+      level.solids.push(s);
+      return b;
+    },
+    /** Free-floating solid at an absolute world Y. */
+    slab(w, yTiles, hTiles, opts = {}) {
+      const s = {
+        x,
+        y: GROUND_Y - yTiles * TILE,
+        w: w * TILE,
+        h: hTiles * TILE,
+        style: opts.style || "block",
+      };
+      if (opts.move) s.move = opts.move;
+      level.solids.push(s);
+      return b;
+    },
+    /** A corridor for flight modes: solid floor `lo` tiles high, ceiling down to `hi`. */
+    corridor(beats, lo, hi) {
+      const w = beats * beat;
+      if (lo > 0) level.solids.push({ x, y: GROUND_Y - lo * TILE, w, h: lo * TILE + 40, style: "wall" });
+      const top = CEIL_Y;
+      const depth = (GROUND_Y - hi * TILE) - top;
+      if (depth > 0) level.solids.push({ x, y: top, w, h: depth, style: "wall" });
+      return b;
+    },
+    /** A gap in the floor, `beats` long. Falling in is fatal. */
+    pit(beats) {
+      level.pits.push({ x0: x, x1: x + beats * beat });
+      return b;
+    },
+    /** Spinning saw blade. `up` tiles above the ground, radius `r` tiles. */
+    saw(up = 1, r = 1, opts = {}) {
+      const h = { type: "saw", x, y: GROUND_Y - up * TILE, r: r * TILE };
+      if (opts.move) h.move = opts.move;
+      level.hazards.push(h);
+      return b;
+    },
+    /** Jump pad on the ground (or on a surface `up` tiles high). */
+    pad(kind = "yellow", up = 0) {
+      level.pads.push({ x, y: GROUND_Y - up * TILE, kind, dir: 1 });
+      return b;
+    },
+    /** Jump pad on the ceiling, firing downward (for flipped gravity). */
+    padTop(kind = "yellow", down = 0) {
+      level.pads.push({ x, y: CEIL_Y + down * TILE, kind, dir: -1 });
+      return b;
+    },
+    /** Mid-air orb: tap while overlapping it to fire. */
+    orb(kind = "yellow", up = 3) {
+      level.orbs.push({ x, y: GROUND_Y - up * TILE, kind });
+      return b;
+    },
+    orbAt(kind, worldY) {
+      level.orbs.push({ x, y: worldY, kind });
+      return b;
+    },
+    coin(up = 4) {
+      level.coins.push({ x, y: GROUND_Y - up * TILE });
+      return b;
+    },
+    /** Coin arc — three coins tracing a jump, purely decorative reward. */
+    coinArc(up = 3) {
+      for (let i = -1; i <= 1; i++) {
+        level.coins.push({ x: x + i * TILE * 1.6, y: GROUND_Y - (up - Math.abs(i) * 0.8) * TILE });
+      }
+      return b;
+    },
+    portal(mode) {
+      level.portals.push({ x, kind: "mode", value: mode, y: GROUND_Y - TILE * 2.2 });
+      return b;
+    },
+    portalAt(mode, up) {
+      level.portals.push({ x, kind: "mode", value: mode, y: GROUND_Y - up * TILE });
+      return b;
+    },
+    grav(dir, up = 2.2) {
+      level.portals.push({ x, kind: "grav", value: dir, y: GROUND_Y - up * TILE });
+      return b;
+    },
+    speedUp(mult, up = 2.2) {
+      level.portals.push({ x, kind: "speed", value: mult, y: GROUND_Y - up * TILE });
+      speed = def.speed * mult;
+      beat = (speed * 60) / def.bpm;
+      return b;
+    },
+    finish() {
+      level.length = x;
+      return level;
+    },
+  };
+
+  return b;
 }
 
-function clamp(v, min, max) {
-  return Math.min(max, Math.max(min, v));
+// ---------------------------------------------------------------------------
+// Reusable rhythm patterns
+// ---------------------------------------------------------------------------
+
+/** n single spikes, one per `gap` beats. The bread and butter of cube play. */
+function spikeBeat(b, n, gap = 2) {
+  for (let i = 0; i < n; i++) {
+    b.spikes(1);
+    b.go(gap);
+  }
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
+/** Stair of blocks up then back down — always landable, never a wall. */
+function stairs(b, steps, gap = 1.4) {
+  for (let i = 0; i < steps; i++) {
+    b.blk(1, i + 1);
+    b.go(gap);
+  }
+  for (let i = steps - 1; i >= 1; i--) {
+    b.blk(1, i);
+    b.go(gap);
+  }
 }
 
-// Every gap/step in a ground segment must stay within what the *shortest*
-// jump among cube/robot/ufo can clear, since a segment's mode is fixed at
-// generation time but the fairness math is shared — keeping these caps
-// mode-agnostic means we never have to special-case which mode is active.
-const MAX_GAP_WIDTH = 135; // world units; keeps real reaction-time margin under every level's jump-arc distance
-const MIN_GAP_WIDTH = 60;
+/** Pad -> long float -> land. Reads as a "lift" moment in the music. */
+function padLaunch(b, coinsUp = 6) {
+  b.pad("yellow");
+  b.go(0.5);
+  b.coinArc(coinsUp);
+  b.go(2.2);
+}
+
+/** A ship/ufo tunnel that narrows then opens back up. */
+function tunnelRun(b, beats, lo, hi) {
+  const steps = Math.max(2, Math.round(beats / 2));
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    const wobble = Math.sin(t * Math.PI);
+    b.corridor(2, lo + wobble * 0.8, hi - wobble * 0.6);
+    b.go(2);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The ten levels
+// ---------------------------------------------------------------------------
+
+const THEMES = {
+  aqua: { sky0: "#061a22", sky1: "#0b3a44", accent: "#4fe3d0", accent2: "#6ee7ff", ground: "#0e5a63", glow: "#7ff5e6" },
+  cobalt: { sky0: "#070d24", sky1: "#132a63", accent: "#5b8cff", accent2: "#8ce0ff", ground: "#1b3a86", glow: "#a8c6ff" },
+  violet: { sky0: "#130824", sky1: "#331257", accent: "#a06bff", accent2: "#ff7ae0", ground: "#4a1e80", glow: "#d3a9ff" },
+  magenta: { sky0: "#210a1c", sky1: "#5a1244", accent: "#ff5ec4", accent2: "#ffa6e6", ground: "#7d1c5c", glow: "#ffb3e8" },
+  amber: { sky0: "#1f1206", sky1: "#5a3106", accent: "#ffa12e", accent2: "#ffe071", ground: "#8a4b0b", glow: "#ffd28a" },
+  ember: { sky0: "#210806", sky1: "#5e1410", accent: "#ff5a48", accent2: "#ffb057", ground: "#8c2018", glow: "#ffa091" },
+  gold: { sky0: "#1d1a05", sky1: "#55480a", accent: "#ffd23f", accent2: "#a6ff6e", ground: "#7d6a10", glow: "#fff0a0" },
+  neon: { sky0: "#22061c", sky1: "#66104f", accent: "#ff2fa0", accent2: "#39e0ff", ground: "#8f1668", glow: "#ff9ad4" },
+  lime: { sky0: "#0a1d09", sky1: "#12521c", accent: "#5cf07a", accent2: "#d6ff54", ground: "#17722a", glow: "#a8ffb8" },
+  crimson: { sky0: "#1a0409", sky1: "#520a14", accent: "#ff2d4d", accent2: "#ff8a3d", ground: "#7d0f1e", glow: "#ff8a99" },
+};
+
+// -- 1. First Steps ---------------------------------------------------------
+function buildL1(b) {
+  b.go(6);
+  b.coin(2);
+  b.go(2);
+  spikeBeat(b, 3, 3);
+  b.go(1);
+  b.coinArc(3);
+  b.go(3);
+  b.blk(2, 1);
+  b.go(4);
+  b.spikes(1);
+  b.go(3);
+  b.blk(1, 1);
+  b.go(2);
+  b.blk(1, 1);
+  b.go(4);
+  b.coin(2);
+  b.go(2);
+  b.pit(0.7);
+  b.go(4);
+  spikeBeat(b, 2, 2.6);
+  b.go(1.5);
+  padLaunch(b, 6);
+  b.go(2);
+  b.spikes(2);
+  b.go(3.5);
+  stairs(b, 2, 1.6);
+  b.go(3);
+  b.coinArc(3);
+  b.go(2);
+  b.spikes(1);
+  b.go(2.6);
+  b.spikes(1);
+  b.go(2.6);
+  b.spikes(1);
+  b.go(4);
+  b.pit(0.7);
+  b.go(3);
+  b.blk(3, 1);
+  b.go(1.5);
+  b.coin(3);
+  b.go(3);
+  spikeBeat(b, 3, 2.4);
+  b.go(2);
+  b.pad("yellow");
+  b.go(0.5);
+  b.coinArc(7);
+  b.go(3);
+  b.spikes(2);
+  b.go(4);
+  b.go(6);
+}
+
+// -- 2. Neon Drift ----------------------------------------------------------
+function buildL2(b) {
+  b.go(5);
+  spikeBeat(b, 2, 2.6);
+  b.go(1);
+  b.blk(2, 1);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.coinArc(3);
+  b.go(2);
+  b.pit(0.75);
+  b.go(3.5);
+  b.blk(1, 2);
+  b.go(2.5);
+  b.spikes(1);
+  b.go(3);
+  b.portal("ship");
+  b.go(2);
+  tunnelRun(b, 14, 1.4, 6.6);
+  b.go(1);
+  b.corridor(2, 1.2, 5.4);
+  b.coin(4);
+  b.go(3);
+  b.corridor(2, 2.2, 6.4);
+  b.go(3);
+  b.corridor(2, 1.0, 5.0);
+  b.coin(3);
+  b.go(3);
+  tunnelRun(b, 10, 1.6, 6.2);
+  b.go(2);
+  b.portal("cube");
+  b.go(3);
+  spikeBeat(b, 3, 2.4);
+  b.go(1);
+  padLaunch(b, 6);
+  b.go(2);
+  b.spikes(2);
+  b.go(3);
+  stairs(b, 3, 1.4);
+  b.go(2.5);
+  b.spikes(1);
+  b.go(2.4);
+  b.spikes(2);
+  b.go(3);
+  b.pit(0.8);
+  b.go(3);
+  b.coinArc(4);
+  b.go(2);
+  b.spikes(1);
+  b.go(6);
+}
+
+// -- 3. Pulse Grid ----------------------------------------------------------
+function buildL3(b) {
+  b.go(5);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.blk(1, 1);
+  b.go(1.6);
+  b.blk(1, 2);
+  b.go(1.6);
+  b.blk(1, 1);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.6);
+  b.orb("yellow", 3.2);
+  b.coin(5);
+  b.go(0.6);
+  b.pit(1.5);
+  b.go(3.5);
+  b.spikes(1);
+  b.go(2.4);
+  b.spikes(2);
+  b.go(3);
+  b.plat(3, 3);
+  b.coin(4.4);
+  b.go(3);
+  b.spikes(1);
+  b.go(2.2);
+  b.orb("yellow", 3);
+  b.go(0.6);
+  b.pit(1.4);
+  b.go(3.4);
+  stairs(b, 3, 1.3);
+  b.go(2);
+  b.spikes(2);
+  b.go(2.6);
+  padLaunch(b, 7);
+  b.go(1.4);
+  b.spikes(2);
+  b.go(3);
+  b.blk(2, 2);
+  b.go(3);
+  b.spikes(1);
+  b.go(2.2);
+  b.spikes(1);
+  b.go(2.2);
+  b.spikes(2);
+  b.go(3);
+  b.plat(2, 4);
+  b.coin(5.4);
+  b.go(2.6);
+  b.orb("yellow", 3.4);
+  b.go(0.6);
+  b.pit(1.4);
+  b.go(3.5);
+  spikeBeat(b, 3, 2.2);
+  b.go(2);
+  b.coinArc(3);
+  b.go(6);
+}
+
+// -- 4. Gravity Well --------------------------------------------------------
+function buildL4(b) {
+  b.go(5);
+  spikeBeat(b, 2, 2.4);
+  b.go(1);
+  b.blk(2, 1);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.grav(-1);
+  b.go(3);
+  b.spikesDown(2);
+  b.go(3);
+  b.blkTop(2, 1);
+  b.go(3);
+  b.spikesDown(1);
+  b.go(2.4);
+  b.spikesDown(2);
+  b.go(3);
+  b.coin(8);
+  b.go(2);
+  b.grav(1);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.portal("ball");
+  b.go(3);
+  b.spikes(1);
+  b.go(2.4);
+  b.blkTop(3, 1);
+  b.spikes(2);
+  b.go(3.4);
+  b.spikesDown(2);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.blkTop(2, 2);
+  b.go(3);
+  b.spikes(1);
+  b.go(2.2);
+  b.spikesDown(1);
+  b.go(2.2);
+  b.spikes(1);
+  b.go(3);
+  b.coin(5);
+  b.go(2);
+  b.portal("cube");
+  b.go(3);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  padLaunch(b, 7);
+  b.go(2);
+  b.spikes(2);
+  b.go(3);
+  stairs(b, 3, 1.3);
+  b.go(3);
+  b.spikes(1);
+  b.go(2.4);
+  b.spikes(2);
+  b.go(6);
+}
+
+// -- 5. Ion Tunnel ----------------------------------------------------------
+function buildL5(b) {
+  b.go(4);
+  spikeBeat(b, 2, 2.4);
+  b.go(1);
+  b.portal("ship");
+  b.go(2);
+  tunnelRun(b, 12, 1.4, 6.4);
+  b.go(1);
+  b.corridor(2, 2.6, 6.8);
+  b.coin(5);
+  b.go(3);
+  b.corridor(2, 1.0, 4.8);
+  b.go(3);
+  b.corridor(2, 2.4, 6.6);
+  b.coin(4);
+  b.go(3);
+  b.corridor(2, 1.2, 5.2);
+  b.go(3);
+  tunnelRun(b, 8, 1.8, 6.0);
+  b.go(2);
+  b.portal("wave");
+  b.go(3);
+  b.corridor(3, 1.2, 6.6);
+  b.go(4);
+  b.corridor(3, 2.0, 6.4);
+  b.coin(4);
+  b.go(4);
+  b.corridor(3, 1.0, 5.6);
+  b.go(4);
+  b.corridor(3, 2.2, 6.6);
+  b.go(4);
+  b.corridor(3, 1.4, 5.8);
+  b.go(4);
+  b.portal("cube");
+  b.go(3);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.blk(2, 2);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.8);
+  padLaunch(b, 7);
+  b.go(2);
+  b.spikes(2);
+  b.go(3);
+  b.pit(0.8);
+  b.go(3);
+  spikeBeat(b, 2, 2.2);
+  b.go(6);
+}
+
+// -- 6. Sawmill -------------------------------------------------------------
+function buildL6(b) {
+  b.go(4);
+  spikeBeat(b, 2, 2.4);
+  b.go(1);
+  b.saw(1, 1);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.8);
+  b.saw(1.2, 1.2);
+  b.go(3);
+  b.blk(2, 1);
+  b.go(2.4);
+  b.saw(4, 1, { move: { axis: "y", amp: 2 * TILE, periodBeats: 4 } });
+  b.go(3);
+  b.spikes(2);
+  b.go(2.8);
+  b.plat(3, 3, { move: { axis: "y", amp: 1.2 * TILE, periodBeats: 6 } });
+  b.coin(4.6);
+  b.go(3.4);
+  b.saw(1, 1.3);
+  b.go(3);
+  b.orb("yellow", 3.2);
+  b.go(0.6);
+  b.pit(1.5);
+  b.go(3.6);
+  b.spikes(3);
+  b.go(3);
+  b.saw(1, 1);
+  b.go(2.6);
+  b.saw(1, 1);
+  b.go(3);
+  padLaunch(b, 7);
+  b.go(1.2);
+  b.saw(5, 1.4);
+  b.go(2.4);
+  b.spikes(2);
+  b.go(3);
+  stairs(b, 3, 1.3);
+  b.go(2.4);
+  b.saw(1.2, 1.2);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.6);
+  b.orb("yellow", 3.2);
+  b.go(0.6);
+  b.pit(1.5);
+  b.go(3.6);
+  b.plat(3, 3, { move: { axis: "y", amp: 1.4 * TILE, periodBeats: 5 } });
+  b.coin(4.6);
+  b.go(3.4);
+  b.saw(1, 1.2);
+  b.go(3);
+  spikeBeat(b, 3, 2.2);
+  b.go(6);
+}
+
+// -- 7. Quad Shift ----------------------------------------------------------
+function buildL7(b) {
+  b.go(4);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.blk(2, 2);
+  b.go(3);
+  b.portal("ship");
+  b.go(2);
+  tunnelRun(b, 10, 1.6, 6.2);
+  b.go(2);
+  b.portal("ufo");
+  b.go(3);
+  b.corridor(2, 1.0, 6.4);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.6);
+  b.spikesDown(2, { y: GROUND_Y - 6.4 * TILE });
+  b.go(3);
+  b.corridor(2, 1.2, 6.0);
+  b.coin(4);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.portal("ball");
+  b.go(3);
+  b.spikes(1);
+  b.go(2.4);
+  b.blkTop(3, 1);
+  b.spikes(2);
+  b.go(3.4);
+  b.spikesDown(2);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.portal("wave");
+  b.go(3);
+  b.corridor(3, 1.4, 6.4);
+  b.go(4);
+  b.corridor(3, 2.2, 6.6);
+  b.coin(4);
+  b.go(4);
+  b.corridor(3, 1.2, 5.6);
+  b.go(4);
+  b.portal("cube");
+  b.go(3);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  padLaunch(b, 7);
+  b.go(2);
+  b.spikes(2);
+  b.go(3);
+  b.saw(1, 1.2);
+  b.go(3);
+  spikeBeat(b, 2, 2.2);
+  b.go(6);
+}
+
+// -- 8. Overdrive -----------------------------------------------------------
+function buildL8(b) {
+  b.go(4);
+  spikeBeat(b, 2, 2.2);
+  b.go(1);
+  b.speedUp(1.2);
+  b.go(3);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.blk(2, 2);
+  b.go(2.8);
+  b.spikes(2);
+  b.go(2.6);
+  b.saw(1, 1.2);
+  b.go(3);
+  b.orb("yellow", 3.2);
+  b.go(0.6);
+  b.pit(1.4);
+  b.go(3.4);
+  b.spikes(3);
+  b.go(3);
+  b.portal("ship");
+  b.go(2);
+  tunnelRun(b, 12, 1.6, 6.0);
+  b.go(2);
+  b.portal("cube");
+  b.go(3);
+  b.speedUp(1.0);
+  b.go(2.4);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  stairs(b, 3, 1.3);
+  b.go(2.4);
+  b.saw(4, 1.2, { move: { axis: "y", amp: 2.2 * TILE, periodBeats: 4 } });
+  b.go(3);
+  b.spikes(2);
+  b.go(2.6);
+  b.grav(-1);
+  b.go(3);
+  b.spikesDown(2);
+  b.go(2.8);
+  b.blkTop(2, 1);
+  b.go(3);
+  b.spikesDown(3);
+  b.go(3);
+  b.grav(1);
+  b.go(3);
+  b.speedUp(1.25);
+  b.go(2.4);
+  spikeBeat(b, 4, 2.2);
+  b.go(1);
+  padLaunch(b, 7);
+  b.go(2);
+  b.spikes(2);
+  b.go(2.6);
+  b.saw(1, 1.2);
+  b.go(3);
+  spikeBeat(b, 3, 2.2);
+  b.go(6);
+}
+
+// -- 9. Chaos Theory --------------------------------------------------------
+function buildL9(b) {
+  b.go(4);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.portal("ufo");
+  b.go(3);
+  b.corridor(2, 1.0, 6.2);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.6);
+  b.spikesDown(2, { y: GROUND_Y - 6.2 * TILE });
+  b.go(3);
+  b.corridor(2, 1.4, 6.0);
+  b.coin(4);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.portal("wave");
+  b.go(3);
+  b.corridor(3, 1.4, 6.2);
+  b.go(4);
+  b.corridor(3, 2.4, 6.6);
+  b.go(4);
+  b.corridor(3, 1.0, 5.4);
+  b.coin(3);
+  b.go(4);
+  b.corridor(3, 2.0, 6.2);
+  b.go(4);
+  b.portal("cube");
+  b.go(3);
+  b.speedUp(1.2);
+  b.go(2.4);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.saw(1, 1.2);
+  b.go(2.8);
+  b.spikes(3);
+  b.go(3);
+  b.orb("yellow", 3.2);
+  b.go(0.6);
+  b.pit(1.4);
+  b.go(3.4);
+  b.blk(2, 2);
+  b.go(2.8);
+  b.spikes(2);
+  b.go(2.6);
+  b.portal("ship");
+  b.go(2);
+  tunnelRun(b, 12, 1.8, 6.0);
+  b.go(2);
+  b.portal("cube");
+  b.go(3);
+  b.speedUp(1.0);
+  b.go(2.4);
+  padLaunch(b, 7);
+  b.go(2);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.saw(1, 1.2);
+  b.go(3);
+  b.spikes(2);
+  b.go(6);
+}
+
+// -- 10. Demon Core ---------------------------------------------------------
+function buildL10(b) {
+  b.go(4);
+  spikeBeat(b, 3, 2.2);
+  b.go(1);
+  b.blk(2, 2);
+  b.go(2.8);
+  b.spikes(2);
+  b.go(2.6);
+  b.saw(1, 1.2);
+  b.go(3);
+  b.portal("ship");
+  b.go(2);
+  tunnelRun(b, 10, 1.8, 6.0);
+  b.go(2);
+  b.portal("ball");
+  b.go(3);
+  b.spikes(2);
+  b.go(2.8);
+  b.blkTop(3, 1);
+  b.spikes(2);
+  b.go(3.4);
+  b.spikesDown(2);
+  b.go(3);
+  b.spikes(2);
+  b.go(3);
+  b.portal("ufo");
+  b.go(3);
+  b.corridor(2, 1.2, 6.2);
+  b.go(3);
+  b.spikes(2);
+  b.go(2.6);
+  b.spikesDown(2, { y: GROUND_Y - 6.2 * TILE });
+  b.go(3);
+  b.corridor(2, 1.0, 5.8);
+  b.coin(4);
+  b.go(3);
+  b.portal("wave");
+  b.go(3);
+  b.corridor(3, 1.4, 6.0);
+  b.go(4);
+  b.corridor(3, 2.4, 6.4);
+  b.go(4);
+  b.corridor(3, 1.2, 5.4);
+  b.go(4);
+  b.portal("cube");
+  b.go(3);
+  b.speedUp(1.25);
+  b.go(2.4);
+  spikeBeat(b, 4, 2.2);
+  b.go(1);
+  b.saw(1, 1.2);
+  b.go(2.8);
+  b.spikes(3);
+  b.go(3);
+  b.orb("yellow", 3.2);
+  b.go(0.6);
+  b.pit(1.4);
+  b.go(3.4);
+  stairs(b, 3, 1.3);
+  b.go(2.4);
+  b.saw(4, 1.2, { move: { axis: "y", amp: 2.2 * TILE, periodBeats: 4 } });
+  b.go(3);
+  b.speedUp(1.0);
+  b.go(2.4);
+  b.grav(-1);
+  b.go(3);
+  b.spikesDown(2);
+  b.go(2.8);
+  b.spikesDown(3);
+  b.go(3);
+  b.grav(1);
+  b.go(3);
+  padLaunch(b, 7);
+  b.go(2);
+  spikeBeat(b, 4, 2.2);
+  b.go(1);
+  b.blk(2, 2);
+  b.go(3);
+  b.spikes(2);
+  b.go(6);
+}
 
 export const LEVEL_DEFS = [
-  { id: 1, name: "First Steps", difficulty: "Easy", seed: 101, length: 9200, speed: 260, color: "#4fd1c5", density: 0.3, gapChance: 0.2, modePlan: [{ mode: "cube", at: 0 }] },
-  { id: 2, name: "Sky Cruiser", difficulty: "Easy", seed: 202, length: 10500, speed: 280, color: "#5b8cff", density: 0.34, gapChance: 0.22, tunnelMin: 90, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.4 }, { mode: "cube", at: 0.75 }] },
-  { id: 3, name: "Block Party", difficulty: "Normal", seed: 303, length: 11500, speed: 300, color: "#ffb347", density: 0.44, gapChance: 0.25, modePlan: [{ mode: "cube", at: 0 }] },
-  { id: 4, name: "Turbulence", difficulty: "Normal", seed: 404, length: 12800, speed: 320, color: "#7a5cff", density: 0.46, gapChance: 0.26, tunnelMin: 80, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.3 }, { mode: "cube", at: 0.6 }, { mode: "ship", at: 0.85 }] },
-  { id: 5, name: "Iron Legs", difficulty: "Hard", seed: 505, length: 13500, speed: 340, color: "#ff5d73", density: 0.52, gapChance: 0.28, modePlan: [{ mode: "robot", at: 0 }] },
-  { id: 6, name: "Hover Zone", difficulty: "Hard", seed: 606, length: 14200, speed: 360, color: "#3fd68a", density: 0.46, gapChance: 0.28, modePlan: [{ mode: "ufo", at: 0 }] },
-  { id: 7, name: "Quad Shift", difficulty: "Hard", seed: 707, length: 15500, speed: 380, color: "#ffd23f", density: 0.56, gapChance: 0.3, tunnelMin: 75, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.2 }, { mode: "robot", at: 0.45 }, { mode: "ufo", at: 0.7 }, { mode: "cube", at: 0.9 }] },
-  { id: 8, name: "Spike Storm", difficulty: "Harder", seed: 808, length: 17000, speed: 420, color: "#ff7a1a", density: 0.64, gapChance: 0.32, tunnelMin: 70, modePlan: [{ mode: "cube", at: 0 }, { mode: "robot", at: 0.25 }, { mode: "ship", at: 0.5 }, { mode: "ufo", at: 0.75 }] },
-  { id: 9, name: "Chaos Theory", difficulty: "Insane", seed: 909, length: 19500, speed: 460, color: "#ff3fa4", density: 0.72, gapChance: 0.34, tunnelMin: 65, modePlan: [{ mode: "cube", at: 0 }, { mode: "ufo", at: 0.15 }, { mode: "ship", at: 0.35 }, { mode: "robot", at: 0.55 }, { mode: "ship", at: 0.75 }, { mode: "cube", at: 0.9 }] },
-  { id: 10, name: "Demon Core", difficulty: "Demon", seed: 1010, length: 22000, speed: 520, color: "#ff2d4d", density: 0.7, gapChance: 0.32, tunnelMin: 60, modePlan: [{ mode: "cube", at: 0 }, { mode: "ship", at: 0.15 }, { mode: "robot", at: 0.3 }, { mode: "ufo", at: 0.45 }, { mode: "ship", at: 0.6 }, { mode: "cube", at: 0.72 }, { mode: "robot", at: 0.85 }] },
+  { id: 1, name: "First Steps", difficulty: "Easy", stars: 1, speed: 300, bpm: 120, theme: THEMES.aqua, build: buildL1 },
+  { id: 2, name: "Neon Drift", difficulty: "Easy", stars: 2, speed: 310, bpm: 126, theme: THEMES.cobalt, build: buildL2 },
+  { id: 3, name: "Pulse Grid", difficulty: "Normal", stars: 3, speed: 330, bpm: 132, theme: THEMES.violet, build: buildL3 },
+  { id: 4, name: "Gravity Well", difficulty: "Normal", stars: 4, speed: 340, bpm: 136, theme: THEMES.magenta, build: buildL4 },
+  { id: 5, name: "Ion Tunnel", difficulty: "Hard", stars: 5, speed: 355, bpm: 140, theme: THEMES.amber, build: buildL5 },
+  { id: 6, name: "Sawmill", difficulty: "Hard", stars: 6, speed: 365, bpm: 144, theme: THEMES.ember, build: buildL6 },
+  { id: 7, name: "Quad Shift", difficulty: "Harder", stars: 7, speed: 380, bpm: 150, theme: THEMES.gold, build: buildL7 },
+  { id: 8, name: "Overdrive", difficulty: "Harder", stars: 8, speed: 395, bpm: 156, theme: THEMES.neon, build: buildL8 },
+  { id: 9, name: "Chaos Theory", difficulty: "Insane", stars: 9, speed: 410, bpm: 162, theme: THEMES.lime, build: buildL9 },
+  { id: 10, name: "Demon Core", difficulty: "Demon", stars: 10, speed: 425, bpm: 170, theme: THEMES.crimson, build: buildL10 },
 ];
 
-function generateGroundSegment(rng, seg, def, groundSegments, hazards) {
-  let cursor = seg.start;
-  // Tighter than a first pass: real Geometry Dash rarely gives more than a
-  // beat of flat runway between obstacles, even on easy levels.
-  const reactionTime = lerp(1.1, 0.5, def.density);
-  const marginEnd = 220;
+const cache = new Map();
 
-  while (cursor < seg.end - marginEnd) {
-    const flatLen = Math.round(def.speed * (reactionTime + rng() * 0.35));
-    const flatEnd = Math.min(cursor + flatLen, seg.end - marginEnd);
-    groundSegments.push({ x0: cursor, x1: flatEnd, floorY: GROUND_Y });
-    cursor = flatEnd;
-    if (cursor >= seg.end - marginEnd) break;
+/** Build (and memoise) the full geometry for a level definition. */
+export function getLevel(def) {
+  if (cache.has(def.id)) return cache.get(def.id);
 
-    const roll = rng();
-    if (roll < def.gapChance) {
-      const w = MIN_GAP_WIDTH + rng() * (MAX_GAP_WIDTH - MIN_GAP_WIDTH);
-      groundSegments.push({ x0: cursor, x1: cursor + w, floorY: null });
-      cursor += w;
-    } else if (roll < def.gapChance + 0.3) {
-      // Plain raised platform — floor.js's landing rule auto-mounts these
-      // (no jump required), so it must never carry a hazard: a standing
-      // player's own hitbox already occupies the space directly above the
-      // platform, which would make any hazard there unavoidable rather than
-      // something to jump over.
-      const w = 70 + rng() * 50;
-      groundSegments.push({ x0: cursor, x1: cursor + w, floorY: GROUND_Y - BLOCK_HEIGHT });
-      cursor += w;
-    } else if (roll < def.gapChance + 0.42) {
-      // Tall spike on flat ground — a taller, single-hazard variant of the
-      // spike row below for extra visual/timing variety at higher density.
-      // Height 46 stays safely under every mode's jump apex (cube ~104,
-      // robot/ufo ~77) with real margin, unlike a block-top spike would.
-      groundSegments.push({ x0: cursor, x1: cursor + 30, floorY: GROUND_Y });
-      hazards.push({ x0: cursor + 2, x1: cursor + 28, y0: GROUND_Y - 46, y1: GROUND_Y });
-      cursor += 30;
-    } else {
-      const maxRow = 1 + Math.floor(def.density * 4);
-      const rowCount = 1 + Math.floor(rng() * Math.min(4, maxRow));
-      const rowWidth = (rowCount - 1) * 30 + 44; // must cover every hazard in the row, not just the first
-      groundSegments.push({ x0: cursor, x1: cursor + rowWidth, floorY: GROUND_Y });
-      for (let k = 0; k < rowCount; k++) {
-        const sx = cursor + k * 30;
-        hazards.push({ x0: sx, x1: sx + 26, y0: GROUND_Y - 30, y1: GROUND_Y });
-      }
-      cursor += rowWidth;
-    }
+  const b = makeBuilder(def);
+  def.build(b);
+  const raw = b.finish();
+  const length = raw.length;
+
+  // Floor solids: one long slab, split around every authored pit.
+  const pits = raw.pits.slice().sort((p, q) => p.x0 - q.x0);
+  const floor = [];
+  let cursor = -400;
+  for (const p of pits) {
+    if (p.x0 > cursor) floor.push({ x: cursor, y: GROUND_Y, w: p.x0 - cursor, h: 220, style: "ground" });
+    cursor = p.x1;
   }
+  floor.push({ x: cursor, y: GROUND_Y, w: length + 600 - cursor, h: 220, style: "ground" });
 
-  if (cursor < seg.end) groundSegments.push({ x0: cursor, x1: seg.end, floorY: GROUND_Y });
+  // Ceiling slab so flipped gravity and flight modes have a real surface.
+  const ceiling = [{ x: -400, y: CEIL_Y - 220, w: length + 1000, h: 220, style: "ground" }];
+
+  const level = {
+    def,
+    length,
+    pits,
+    floor,
+    ceiling,
+    solids: raw.solids,
+    hazards: raw.hazards,
+    pads: raw.pads,
+    orbs: raw.orbs,
+    portals: raw.portals.slice().sort((p, q) => p.x - q.x),
+    coins: raw.coins,
+  };
+  level.allSolids = [...ceiling, ...floor, ...raw.solids];
+  level.allSolids.sort((a, c) => a.x - c.x);
+
+  cache.set(def.id, level);
+  return level;
 }
 
-function generateTunnelSegment(rng, seg, def, tunnelKeyframes) {
-  const tunnelMin = def.tunnelMin || 90;
-  let x = seg.start;
-  let mid = 200;
-  let halfHeight = lerp(140, tunnelMin, def.density);
-  tunnelKeyframes.push({ x, floorY: mid + halfHeight, ceilY: mid - halfHeight });
-
-  while (x < seg.end) {
-    x = Math.min(x + 90 + rng() * 70, seg.end);
-    mid = clamp(mid + (rng() * 2 - 1) * 40, 140, 260);
-    halfHeight = clamp(halfHeight + (rng() * 2 - 1) * 15, tunnelMin, 110);
-    tunnelKeyframes.push({ x, floorY: mid + halfHeight, ceilY: mid - halfHeight });
-  }
+/** Vertical offset of a moving solid/hazard, keyed off world-x so retries match. */
+export function moveOffset(move, level, x) {
+  if (!move) return 0;
+  const period = move.periodBeats * ((level.def.speed * 60) / level.def.bpm);
+  return move.amp * Math.sin((x / period) * Math.PI * 2 + (move.phase || 0));
 }
 
-/**
- * Build the full obstacle/tunnel/portal layout for a level def. Returns
- * { ...def, groundSegments, hazards, tunnelKeyframes, portals }.
- *   groundSegments: sorted, contiguous {x0,x1,floorY} covering every
- *     ground-mode range (floorY === null means "pit", no floor collision).
- *   hazards: {x0,x1,y0,y1} instant-death rects (spikes), ground ranges only.
- *   tunnelKeyframes: sorted {x,floorY,ceilY} covering every ship range,
- *     linearly interpolated between consecutive points by the caller.
- *   portals: {x, mode} markers where the active mode switches (excludes the
- *     level's starting mode at x=0, which needs no marker).
- */
-export function generateLevel(def) {
-  const rng = mulberry32(def.seed);
-  const groundSegments = [];
-  const hazards = [];
-  const tunnelKeyframes = [];
-  const portals = [];
-
-  const boundaries = def.modePlan.map((m, i) => ({
-    mode: m.mode,
-    start: Math.round(m.at * def.length),
-    end: i + 1 < def.modePlan.length ? Math.round(def.modePlan[i + 1].at * def.length) : def.length,
-  }));
-
-  boundaries.forEach((seg, i) => {
-    if (i > 0) portals.push({ x: seg.start, mode: seg.mode });
-    if (seg.mode === "ship") {
-      generateTunnelSegment(rng, seg, def, tunnelKeyframes);
-    } else {
-      generateGroundSegment(rng, seg, def, groundSegments, hazards);
-    }
-  });
-
-  return { ...def, groundSegments, hazards, tunnelKeyframes, portals };
+/** Current rect of a solid, with any movement applied. */
+export function solidRect(s, level, x) {
+  const dy = moveOffset(s.move, level, x);
+  return { x: s.x, y: s.y + dy, w: s.w, h: s.h, style: s.style };
 }
 
-/** Floor height (world Y) at world-x for ground modes, or null if it's a pit. */
-export function floorAt(level, x) {
-  const segs = level.groundSegments;
-  for (let i = 0; i < segs.length; i++) {
-    const s = segs[i];
-    if (x >= s.x0 && x < s.x1) return s.floorY;
-  }
-  return GROUND_Y;
-}
-
-/** {floorY, ceilY} at world-x for the ship tunnel, linearly interpolated. */
-export function tunnelAt(level, x) {
-  const kf = level.tunnelKeyframes;
-  if (kf.length === 0) return { floorY: GROUND_Y, ceilY: 40 };
-  if (x <= kf[0].x) return kf[0];
-  for (let i = 0; i < kf.length - 1; i++) {
-    const a = kf[i];
-    const b = kf[i + 1];
-    if (x >= a.x && x <= b.x) {
-      const t = b.x === a.x ? 0 : (x - a.x) / (b.x - a.x);
-      return { floorY: lerp(a.floorY, b.floorY, t), ceilY: lerp(a.ceilY, b.ceilY, t) };
-    }
-  }
-  return kf[kf.length - 1];
-}
-
-/** Mode active at world-x, derived from the level's modePlan fractions. */
 export function modeAt(level, x) {
-  let mode = level.modePlan[0].mode;
-  for (const step of level.modePlan) {
-    if (x >= step.at * level.length) mode = step.mode;
+  let mode = "cube";
+  for (const p of level.portals) {
+    if (p.kind === "mode" && p.x <= x) mode = p.value;
   }
   return mode;
 }
 
-export function bestScoreKey(levelId) {
-  return `game-tastic:geo-dash:best:${levelId}`;
+export function gravityAt(level, x) {
+  let g = 1;
+  for (const p of level.portals) {
+    if (p.kind === "grav" && p.x <= x) g = p.value;
+  }
+  return g;
+}
+
+export function speedAt(level, x) {
+  let mult = 1;
+  for (const p of level.portals) {
+    if (p.kind === "speed" && p.x <= x) mult = p.value;
+  }
+  return level.def.speed * mult;
+}
+
+export function storeKey(suffix) {
+  return `game-tastic:geo-dash:${suffix}`;
 }

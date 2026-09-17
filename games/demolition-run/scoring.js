@@ -1,53 +1,103 @@
-// scoring.js — score/damage state, speed-multiplier scoring, and high-score
-// persistence for Demolition Run.
-//
-// Contract:
-//   createScoreState()               -> { score: 0, damage: 0 }
-//   awardPoints(scoreState, prop, carSpeed)
-//       adds Math.round(prop.basePoints * speedMultiplier) to scoreState.score,
-//       where speedMultiplier = 1 + (carSpeed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED)
-//       (ranges 1.0 at MIN_SPEED=8 to 2.0 at MAX_SPEED=40).
-//   applyDamage(scoreState, amount)
-//       adds `amount` to scoreState.damage, clamps to [0, 100]. No passive
-//       decay — damage only ever goes up during a run.
-//   loadBest() / saveBestIfNeeded(score)
-//       thin wrapper around shared/game-utils.js's loadHighScore/saveHighScore
-//       under this game's localStorage key, mirroring flappy-tap's
-//       load-once/update-on-beat pattern.
+// scoring.js — score, the decaying combo multiplier, the RAMPAGE overdrive
+// state, damage, and high-score persistence.
 
 import { loadHighScore, saveHighScore } from "../../shared/game-utils.js";
 
 const HIGHSCORE_KEY = "game-tastic:demolition-run:highscore";
 
-const MIN_SPEED = 8;
-const MAX_SPEED = 40;
+export const COMBO_WINDOW = 2.6; // seconds of grace between smashes
+export const RAMPAGE_AT = 12; // chained smashes needed to go overdrive
+export const RAMPAGE_DURATION = 7;
 
-/** Fresh score/damage state for a run. */
 export function createScoreState() {
-  return { score: 0, damage: 0 };
+  return {
+    score: 0,
+    damage: 0,
+    combo: 0,
+    comboTimer: 0,
+    multiplier: 1,
+    rampage: 0,
+    rampageFired: false,
+    bestCombo: 0,
+    smashes: 0,
+    nearMisses: 0,
+  };
 }
 
-/** Award points for smashing `prop`, scaled by current car speed. */
-export function awardPoints(scoreState, prop, carSpeed) {
-  const speedMultiplier = 1 + (carSpeed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED);
-  scoreState.score += Math.round(prop.basePoints * speedMultiplier);
+/** Multiplier curve: 1x .. 8x, doubled while RAMPAGE is up. */
+function multiplierFor(state) {
+  const base = 1 + Math.min(7, Math.floor(state.combo / 2) * 0.5);
+  return state.rampage > 0 ? base * 2 : base;
 }
 
-/** Add `amount` damage, clamped to [0, 100]. */
-export function applyDamage(scoreState, amount) {
-  scoreState.damage = Math.min(100, Math.max(0, scoreState.damage + amount));
+/**
+ * Register a smash. Returns { points, multiplier, rampageStarted } so the
+ * caller can throw up a popup at the impact point.
+ */
+export function registerSmash(state, prop, speedNorm) {
+  state.combo += 1;
+  state.comboTimer = COMBO_WINDOW;
+  state.smashes += 1;
+  if (state.combo > state.bestCombo) state.bestCombo = state.combo;
+
+  let rampageStarted = false;
+  if (state.combo >= RAMPAGE_AT && state.rampage <= 0 && !state.rampageFired) {
+    state.rampage = RAMPAGE_DURATION;
+    state.rampageFired = true;
+    rampageStarted = true;
+  }
+
+  state.multiplier = multiplierFor(state);
+  const speedBonus = 1 + speedNorm * 1.2;
+  const points = Math.round(prop.points * speedBonus * state.multiplier);
+  state.score += points;
+  return { points, multiplier: state.multiplier, rampageStarted };
 }
 
-/** Load the persisted best score (0 if none yet). Call once at boot. */
+export function registerNearMiss(state) {
+  state.nearMisses += 1;
+  state.comboTimer = Math.max(state.comboTimer, COMBO_WINDOW * 0.6);
+  const points = Math.round(30 * state.multiplier);
+  state.score += points;
+  return points;
+}
+
+export function registerAir(state, airTime) {
+  const points = Math.round(airTime * 220 * state.multiplier);
+  state.score += points;
+  state.comboTimer = Math.max(state.comboTimer, COMBO_WINDOW * 0.8);
+  return points;
+}
+
+/** Tick the combo/rampage timers. Returns true on the frame the combo drops. */
+export function tickScore(state, dt) {
+  let dropped = false;
+  if (state.comboTimer > 0) {
+    state.comboTimer -= dt;
+    if (state.comboTimer <= 0) {
+      dropped = state.combo > 0;
+      state.combo = 0;
+      state.comboTimer = 0;
+      state.rampageFired = false;
+    }
+  }
+  if (state.rampage > 0) {
+    state.rampage -= dt;
+    if (state.rampage < 0) state.rampage = 0;
+  }
+  state.multiplier = multiplierFor(state);
+  return dropped;
+}
+
+export function applyDamage(state, amount) {
+  state.damage = Math.min(100, Math.max(0, state.damage + amount));
+  return state.damage;
+}
+
 export function loadBest() {
   return loadHighScore(HIGHSCORE_KEY, 0);
 }
 
-/**
- * Persist `score` as the new best if it beats `currentBest`. Returns the
- * (possibly updated) best value, mirroring flappy-tap's inline pattern but
- * factored out so main.js doesn't need to touch localStorage directly.
- */
 export function saveBestIfNeeded(score, currentBest) {
   if (score > currentBest) {
     saveHighScore(HIGHSCORE_KEY, score);
