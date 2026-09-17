@@ -3,20 +3,37 @@
 // def for any index >= 0, and generateLevel(def) builds its event list from
 // a seeded PRNG (mulberry32, same pattern as the other games in this repo).
 //
-// Design note on fairness: the player's gun always autofires at whatever
-// wave is in range (no aiming skill involved), so a wave is beatable exactly
-// when its total HP fits inside deliverable damage during its firing
-// window. Gates now come in pairs (steer left or right to choose one of two
-// operations), so the player has real agency over which op they take —
-// generateLevel() accounts for this by running a "reference" legion through
-// the WORSE of each pair (whichever leaves it with lower resulting DPS) and
-// sizing each wave's HP against that worst-case reference's DPS at that
-// point, with a fixed safety margin. This means every level is guaranteed
-// completable no matter which side of every gate the player picks.
+// Design note on fairness: the gun always autofires (no timing/aiming
+// skill), but it only ever damages the column of enemies nearest the
+// legion's current x (see HIT_RADIUS) — so clearing a wave with several
+// columns means actually steering across to each one before it reaches you.
+// generateLevel() sizes each wave's total HP against a "reference" legion's
+// DPS at that point, discounted by a conservative time budget for the
+// column-switching travel (SWITCH_TIME) so the numbers stay beatable even
+// though real movement is now required, not just automatic hits. Gates come
+// in pairs (steer left or right to choose one of two operations); the
+// reference legion tracks the WORSE possible outcome per stat (see
+// worstCaseGateUpdate below) so every level stays completable no matter
+// which side of every gate the player picks.
 
 export const LANE_HALF_WIDTH = 3;
 export const PLAYER_X_CLAMP = 2.6;
 export const RANGE = 22; // world units ahead a wave must be within to take fire
+
+// A wave's enemies are spread across up to 4 columns; the gun only ever
+// damages the column nearest the legion's current x, so clearing a
+// multi-column wave means actually steering across to each one in turn —
+// this is the whole point (previously every column took damage regardless
+// of position, which made steering during combat pointless).
+export const WAVE_COLUMN_HALF_SPAN = PLAYER_X_CLAMP * 0.9;
+// Must stay under half the tightest column spacing (4 columns across
+// WAVE_COLUMN_HALF_SPAN*2 gives ~0.78 half-spacing) so distinct columns
+// never both read as "in range" from the same legion position.
+export const HIT_RADIUS = 0.7;
+// Time budget (seconds) generation assumes a real steer-to-adjacent-column
+// costs, given the legion's lateral ease rate — used only to size wave HP
+// conservatively, never to change actual runtime movement.
+const SWITCH_TIME = 0.35;
 
 export const BASE_COUNT = 1;
 export const BASE_FIRE_RATE = 2; // shots/sec equivalent
@@ -192,7 +209,9 @@ function rollGatePair(rng, difficulty) {
  * Build the full event list for a level def. Returns { ...def, events }
  * where events is a z-ascending array of:
  *   { type: "gate", z, left: {kind,value,label}, right: {kind,value,label} }
- *   { type: "wave", z, hp, maxHp, cols, rows, penalty }
+ *   { type: "wave", z, maxHp, hpEach, cols, rows, count, colX, colHp, penalty }
+ *     colX/colHp are parallel per-column arrays; a column is "cleared" once
+ *     its colHp reaches 0, and the whole wave once every column is.
  */
 export function generateLevel(def) {
   const rng = mulberry32(def.seed);
@@ -222,10 +241,37 @@ export function generateLevel(def) {
       const cols = 1 + Math.floor(rng() * 4);
       const rows = 1 + Math.floor(rng() * Math.min(3, 1 + def.difficulty * 2));
       const count = cols * rows;
-      const targetHp = dps * window * TARGET_FRACTION;
+
+      // Only the column nearest the legion's current x takes damage, so
+      // clearing every column costs real travel time between them — budget
+      // for that conservatively (see SWITCH_TIME) rather than assuming the
+      // full window is available for pure damage output.
+      const usableWindow = Math.max(window * 0.4, window - cols * SWITCH_TIME);
+      const targetHp = dps * usableWindow * TARGET_FRACTION;
       const hpEach = targetHp / count;
+
+      const colX = [];
+      const colHp = [];
+      for (let c = 0; c < cols; c++) {
+        colX.push(cols === 1 ? 0 : ((c / (cols - 1)) * 2 - 1) * WAVE_COLUMN_HALF_SPAN);
+        colHp.push(targetHp / cols);
+      }
+
       const penalty = Math.min(3, 1 + Math.floor(count / 5));
-      events.push({ type: "wave", z: cursor, hp: targetHp, maxHp: targetHp, hpEach, cols, rows, count, penalty, cleared: false, resolved: false });
+      events.push({
+        type: "wave",
+        z: cursor,
+        maxHp: targetHp,
+        hpEach,
+        cols,
+        rows,
+        count,
+        colX,
+        colHp,
+        penalty,
+        cleared: false,
+        resolved: false,
+      });
       lastType = "wave";
       cursor += Math.max(def.speed * window + def.speed * 0.5, def.speed * (1.8 + rng() * 1.2));
     }

@@ -5,8 +5,8 @@
 import * as THREE from "three";
 import { onPointer, createLoop, loadHighScore, saveHighScore, showToast } from "../../shared/game-utils.js";
 import { getLevelDef, generateLevel, bestScoreKey } from "./levels.js";
-import { createLegion, resetLegion, beginSteer, updateSteer, endSteer, updateLateralEase } from "./legion.js";
-import { createRun, stepRun } from "./combat.js";
+import { createLegion, resetLegion, dps, beginSteer, updateSteer, endSteer, updateLateralEase } from "./legion.js";
+import { createRun, stepRun, findActiveTarget } from "./combat.js";
 import {
   createGround,
   createLevelVisuals,
@@ -15,6 +15,9 @@ import {
   updateWaveDummies,
   createLegionCrowd,
   updateLegionCrowd,
+  createBulletPool,
+  spawnBullet,
+  updateBullets,
   updateCamera,
 } from "./render.js";
 
@@ -30,12 +33,23 @@ const levelValueEl = document.getElementById("level-value");
 const finalLevelEl = document.getElementById("final-level");
 const finalScoreEl = document.getElementById("final-score");
 const finalBestEl = document.getElementById("final-best");
+const finalPowerEl = document.getElementById("final-power");
+const finalBestPowerEl = document.getElementById("final-best-power");
+const menuBestPowerEl = document.getElementById("menu-best-power");
 const progressFillEl = document.getElementById("progress-fill");
 const toastEl = document.getElementById("toast");
 
 const BEST_KEY = bestScoreKey();
 let best = loadHighScore(BEST_KEY, 0);
 bestValueEl.textContent = String(best);
+
+// "Global" reward: army power (count x fire rate x damage) is a persistent
+// high score of its own, independent of any single run's score, so it
+// reflects how strong an army you've ever built rather than resetting
+// every time you die.
+const BEST_POWER_KEY = "game-tastic:formula-legion:best-power";
+let bestPower = loadHighScore(BEST_POWER_KEY, 0);
+menuBestPowerEl.textContent = String(Math.round(bestPower));
 
 canvas.style.touchAction = "none";
 
@@ -71,6 +85,10 @@ window.addEventListener("orientationchange", handleResize);
 handleResize();
 
 const crowd = createLegionCrowd(scene);
+const bulletPool = createBulletPool(scene);
+let fireAccumulator = 0;
+const muzzleVec = new THREE.Vector3();
+const targetVec = new THREE.Vector3();
 
 // ---- run state ----
 let levelIndex = 0;
@@ -140,15 +158,28 @@ function triggerGameOver() {
   state = "gameover";
   best = Math.max(best, run.score);
   saveHighScore(BEST_KEY, best);
+  const power = dps(legion);
+  bestPower = Math.max(bestPower, power);
+  saveHighScore(BEST_POWER_KEY, bestPower);
+
   bestValueEl.textContent = String(best);
   finalLevelEl.textContent = String(level.id);
   finalScoreEl.textContent = String(run.score);
   finalBestEl.textContent = String(best);
+  finalPowerEl.textContent = String(Math.round(power));
+  finalBestPowerEl.textContent = String(Math.round(bestPower));
+  menuBestPowerEl.textContent = String(Math.round(bestPower));
   gameoverOverlay.hidden = false;
 }
 
 function advanceToNextLevel() {
-  showToast(toastEl, `Level ${level.id} cleared!`);
+  const power = dps(legion);
+  if (power > bestPower) {
+    bestPower = power;
+    saveHighScore(BEST_POWER_KEY, bestPower);
+    menuBestPowerEl.textContent = String(Math.round(bestPower));
+  }
+  showToast(toastEl, `Level ${level.id} cleared! Army power ${Math.round(power)}`);
   levelIndex++;
   loadLevel(levelIndex);
 }
@@ -165,6 +196,24 @@ function update(dt) {
   updateLevelVisuals(level, run.playerZ);
   updateLegionCrowd(crowd, legion, run.playerZ);
   updateCamera(camera, legion, run.playerZ, dt);
+
+  // Tracer bullets: purely cosmetic, but they're the only reason shooting
+  // is visible at all — spawn toward whatever combat.js is actually
+  // damaging right now, so they always point at a real, live target.
+  const target = findActiveTarget(level, run.playerZ, legion.x);
+  if (target) {
+    const visualRate = Math.min(16, Math.max(3, legion.fireRate * Math.sqrt(legion.count)));
+    fireAccumulator += dt * visualRate;
+    while (fireAccumulator >= 1) {
+      fireAccumulator -= 1;
+      muzzleVec.set(legion.x, 1.0, run.playerZ + 0.8);
+      targetVec.set(target.x, 0.9, target.z);
+      spawnBullet(bulletPool, muzzleVec, targetVec);
+    }
+  } else {
+    fireAccumulator = 0;
+  }
+  updateBullets(bulletPool, dt);
 
   updateHud();
 
