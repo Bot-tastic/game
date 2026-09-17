@@ -15,6 +15,9 @@ import {
   updateWaveDummies,
   createLegionCrowd,
   updateLegionCrowd,
+  visibleLegionCount,
+  legionLayoutCols,
+  legionSlotPosition,
   createBulletPool,
   spawnBullet,
   updateBullets,
@@ -59,13 +62,13 @@ let state = "menu";
 // ---- three.js scene setup ----
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0d12);
-scene.fog = new THREE.Fog(0x0b0d12, 20, 70);
+scene.fog = new THREE.Fog(0x0b0d12, 30, 110);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.shadowMap.enabled = false;
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 90);
+const camera = new THREE.PerspectiveCamera(64, window.innerWidth / window.innerHeight, 0.1, 130);
 
 const hemiLight = new THREE.HemisphereLight(0xaab8ff, 0x2a2320, 1.2);
 scene.add(hemiLight);
@@ -88,7 +91,6 @@ const crowd = createLegionCrowd(scene);
 const bulletPool = createBulletPool(scene);
 let fireAccumulator = 0;
 const muzzleVec = new THREE.Vector3();
-const targetVec = new THREE.Vector3();
 
 // ---- run state ----
 let levelIndex = 0;
@@ -198,17 +200,22 @@ function update(dt) {
   updateCamera(camera, legion, run.playerZ, dt);
 
   // Tracer bullets: purely cosmetic, but they're the only reason shooting
-  // is visible at all — spawn toward whatever combat.js is actually
-  // damaging right now, so they always point at a real, live target.
+  // is visible at all. Every visible soldier fires at once, in sync, at the
+  // legion's actual fire rate — not a handful of random potshots — and
+  // each bullet just travels straight forward from where it was fired
+  // (no homing/lerping toward the target) until it's gone far enough.
   const target = findActiveTarget(level, run.playerZ, legion.x);
   if (target) {
-    const visualRate = Math.min(16, Math.max(3, legion.fireRate * Math.sqrt(legion.count)));
-    fireAccumulator += dt * visualRate;
-    while (fireAccumulator >= 1) {
-      fireAccumulator -= 1;
-      muzzleVec.set(legion.x, 1.0, run.playerZ + 0.8);
-      targetVec.set(target.x, 0.9, target.z);
-      spawnBullet(bulletPool, muzzleVec, targetVec);
+    fireAccumulator += dt * legion.fireRate;
+    if (fireAccumulator >= 1) {
+      fireAccumulator -= Math.floor(fireAccumulator);
+      const visibleCount = visibleLegionCount(legion);
+      const cols = legionLayoutCols(visibleCount);
+      for (let i = 0; i < visibleCount; i++) {
+        const shooter = legionSlotPosition(legion, run.playerZ, i, cols);
+        muzzleVec.set(shooter.x, shooter.y + 0.6, shooter.z);
+        spawnBullet(bulletPool, muzzleVec, Math.max(1, target.z - shooter.z));
+      }
     }
   } else {
     fireAccumulator = 0;

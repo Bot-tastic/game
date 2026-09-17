@@ -6,7 +6,8 @@
 import * as THREE from "three";
 import { LANE_HALF_WIDTH, RANGE } from "./levels.js";
 
-const LEGION_CAP = 25; // visual cap; HUD count text always shows the real number
+export const LEGION_CAP = 600; // visual cap; HUD count text always shows the real number
+const LEGION_SPACING = 0.5;
 const GATE_COLORS = {
   countAdd: 0x4fd18c,
   countSub: 0xff5d73,
@@ -176,24 +177,41 @@ export function createLegionCrowd(scene) {
   return { bodies, heads, dummy };
 }
 
+/** How many legion members are actually rendered, and how many columns
+ * their grid formation uses — shared with main.js so it can pick a random
+ * *real* crowd-member position (e.g. for a muzzle flash) that matches
+ * exactly what's on screen. */
+export function visibleLegionCount(legion) {
+  return Math.min(LEGION_CAP, legion.count);
+}
+
+export function legionLayoutCols(visible) {
+  return Math.max(1, Math.ceil(Math.sqrt(visible * 1.3)));
+}
+
+/** World position of crowd-grid slot `i` (body height; add ~0.7 for head). */
+export function legionSlotPosition(legion, playerZ, i, cols) {
+  const col = i % cols;
+  const row = Math.floor(i / cols);
+  const fx = (col - (cols - 1) / 2) * LEGION_SPACING;
+  const fz = -row * LEGION_SPACING * 0.9;
+  return { x: legion.x + fx, y: 0.55, z: playerZ + fz };
+}
+
 /** Position the legion crowd grid centered on (legion.x, 0, playerZ). */
 export function updateLegionCrowd(crowd, legion, playerZ) {
-  const visible = Math.min(LEGION_CAP, legion.count);
-  const cols = Math.max(1, Math.min(5, Math.ceil(Math.sqrt(visible))));
-  const spacing = 0.62;
+  const visible = visibleLegionCount(legion);
+  const cols = legionLayoutCols(visible);
 
   crowd.bodies.count = visible;
   crowd.heads.count = visible;
 
   for (let i = 0; i < visible; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const fx = (col - (cols - 1) / 2) * spacing;
-    const fz = -row * spacing * 0.9;
-    crowd.dummy.position.set(legion.x + fx, 0.55, playerZ + fz);
+    const pos = legionSlotPosition(legion, playerZ, i, cols);
+    crowd.dummy.position.set(pos.x, pos.y, pos.z);
     crowd.dummy.updateMatrix();
     crowd.bodies.setMatrixAt(i, crowd.dummy.matrix);
-    crowd.dummy.position.y = 1.25;
+    crowd.dummy.position.y = pos.y + 0.7;
     crowd.dummy.updateMatrix();
     crowd.heads.setMatrixAt(i, crowd.dummy.matrix);
   }
@@ -201,13 +219,18 @@ export function updateLegionCrowd(crowd, legion, playerZ) {
   crowd.heads.instanceMatrix.needsUpdate = true;
 }
 
-const BULLET_TRAVEL_TIME = 0.12; // seconds for a tracer to cross from muzzle to target
+export const BULLET_SPEED = 55; // world units/sec, straight-line +Z travel only
 const _bulletDummy = new THREE.Object3D();
 
-/** Pool of tracer "bullets" so shooting is actually visible. Cheap: one
- * InstancedMesh, round-robin reuse, no per-bullet allocation after setup. */
-export function createBulletPool(scene, capacity = 24) {
-  const geo = new THREE.SphereGeometry(0.09, 6, 6);
+/** Pool of tracer "bullets" so shooting is actually visible. Every shot
+ * travels straight forward (+Z) from wherever it was fired — no homing, no
+ * lerping toward a target position — until it's gone `distance` units, at
+ * which point it's freed. Capacity is fixed at creation (three.js
+ * InstancedMesh can't grow its instance buffer later), sized generously so
+ * a full synchronized legion volley — even several overlapping volleys in
+ * flight from a high fire rate — is never actually short of slots. */
+export function createBulletPool(scene, capacity = LEGION_CAP * 4) {
+  const geo = new THREE.SphereGeometry(0.08, 6, 6);
   const mat = new THREE.MeshBasicMaterial({ color: 0xfff2a0 });
   const mesh = new THREE.InstancedMesh(geo, mat, capacity);
   mesh.frustumCulled = false; // same InstancedMesh culling gotcha as the legion crowd
@@ -216,7 +239,7 @@ export function createBulletPool(scene, capacity = 24) {
 
   const bullets = [];
   for (let i = 0; i < capacity; i++) {
-    bullets.push({ active: false, t: 0, from: new THREE.Vector3(), to: new THREE.Vector3() });
+    bullets.push({ active: false, x: 0, y: 0, z: 0, remaining: 0 });
     _bulletDummy.position.set(0, -1000, 0);
     _bulletDummy.scale.set(0, 0, 0);
     _bulletDummy.updateMatrix();
@@ -226,27 +249,33 @@ export function createBulletPool(scene, capacity = 24) {
   return { mesh, bullets, cursor: 0 };
 }
 
-/** Fire one tracer from `fromVec3` to `toVec3` (both THREE.Vector3-likes). */
-export function spawnBullet(pool, fromVec3, toVec3) {
-  const b = pool.bullets[pool.cursor];
+/** Fire one straight-forward tracer from `fromVec3`, traveling `distance`
+ * world units in +Z before disappearing. Round-robins through the fixed
+ * pool; with capacity sized as above this only ever reuses a slot whose
+ * bullet has already finished traveling. */
+export function spawnBullet(pool, fromVec3, distance) {
+  const slot = pool.bullets[pool.cursor];
   pool.cursor = (pool.cursor + 1) % pool.bullets.length;
-  b.active = true;
-  b.t = 0;
-  b.from.copy(fromVec3);
-  b.to.copy(toVec3);
+  slot.active = true;
+  slot.x = fromVec3.x;
+  slot.y = fromVec3.y;
+  slot.z = fromVec3.z;
+  slot.remaining = distance;
 }
 
 export function updateBullets(pool, dt) {
+  const step = BULLET_SPEED * dt;
   for (let i = 0; i < pool.bullets.length; i++) {
     const b = pool.bullets[i];
     if (!b.active) continue;
-    b.t += dt / BULLET_TRAVEL_TIME;
-    if (b.t >= 1) {
+    b.z += step;
+    b.remaining -= step;
+    if (b.remaining <= 0) {
       b.active = false;
       _bulletDummy.position.set(0, -1000, 0);
       _bulletDummy.scale.set(0, 0, 0);
     } else {
-      _bulletDummy.position.lerpVectors(b.from, b.to, b.t);
+      _bulletDummy.position.set(b.x, b.y, b.z);
       _bulletDummy.scale.set(1, 1, 1);
     }
     _bulletDummy.updateMatrix();
@@ -255,12 +284,12 @@ export function updateBullets(pool, dt) {
   pool.mesh.instanceMatrix.needsUpdate = true;
 }
 
-/** Damped third-person chase camera following the legion, framed low and
- * close so the crowd itself reads clearly in the lower half of the screen
- * (rather than a distant top-down view where it's a tiny speck). */
+/** Damped third-person chase camera following the legion, pulled back far
+ * enough to frame a large crowd formation (not just a handful of figures)
+ * plus a useful stretch of the path ahead. */
 export function updateCamera(camera, legion, playerZ, dt) {
-  const targetPos = new THREE.Vector3(legion.x * 0.6, 3.4, playerZ - 5.5);
+  const targetPos = new THREE.Vector3(legion.x * 0.6, 7.5, playerZ - 12.5);
   const damping = Math.min(1, 6 * dt);
   camera.position.lerp(targetPos, damping);
-  camera.lookAt(legion.x, 0.9, playerZ + RANGE * 0.4);
+  camera.lookAt(legion.x, 1.2, playerZ + RANGE * 0.45);
 }
