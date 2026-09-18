@@ -5,10 +5,13 @@
 // records and whoever is driving it drains them each frame for particles and
 // sound. Nothing in here needs to know whether anyone is watching.
 
-import { BLOONS, DIFFICULTIES, GAME_SPEED, MAPS, canDamage, totalPops } from "./config.js";
+import { BLOONS, DIFFICULTIES, GAME_SPEED, MAPS, WORLD, canDamage, totalPops } from "./config.js";
 import { buildPath, offPath, pointAt } from "./path.js";
 import { ROUND_COUNT, buildSchedule, roundReward } from "./rounds.js";
-import { TOWER_BY_ID, TOWER_RADIUS, investedValue, nextUpgrade, resolveStats, sellValue, upgradeBlocked } from "./towers.js";
+import {
+  HERO_ID, HERO_MAX_LEVEL, TOWER_BY_ID, TOWER_RADIUS,
+  heroLevel, nextUpgrade, resolveStats, sellValue, upgradeBlocked,
+} from "./towers.js";
 
 export const TARGET_MODES = ["first", "last", "strong", "close"];
 
@@ -28,12 +31,15 @@ export function createGame({ mapId, difficultyId, startRound = 1 }) {
     bloons: [],
     towers: [],
     projectiles: [],
+    effects: [],
     schedule: [],
     spawnIdx: 0,
     waveTime: 0,
     leaked: 0,
     popsTotal: 0,
     cashEarned: 0,
+    heroXp: 0,
+    heroLevel: 1,
     events: [],
   };
 }
@@ -41,7 +47,7 @@ export function createGame({ mapId, difficultyId, startRound = 1 }) {
 // ------------------------------------------------------------ placement ----
 
 export function canPlace(state, x, y, radius = TOWER_RADIUS) {
-  if (x < radius || y < radius || x > 720 - radius || y > 1180 - radius) return false;
+  if (x < radius || y < radius || x > WORLD.w - radius || y > WORLD.h - radius) return false;
   if (!offPath(state.path, x, y, radius)) return false;
   for (const t of state.towers) {
     if (Math.hypot(t.x - x, t.y - y) < radius + TOWER_RADIUS - 4) return false;
@@ -49,9 +55,16 @@ export function canPlace(state, x, y, radius = TOWER_RADIUS) {
   return true;
 }
 
+/** True when this tower type is already on the board and only one is allowed. */
+export function alreadyPlaced(state, defId) {
+  const def = TOWER_BY_ID[defId];
+  return !!def?.unique && state.towers.some((t) => t.defId === defId);
+}
+
 export function placeTower(state, defId, x, y) {
   const def = TOWER_BY_ID[defId];
-  if (!def || state.cash < def.cost || !canPlace(state, x, y)) return null;
+  if (!def || state.cash < def.cost || alreadyPlaced(state, defId)) return null;
+  if (!canPlace(state, x, y)) return null;
   state.cash -= def.cost;
   const tower = {
     id: nextId++,
@@ -59,8 +72,12 @@ export function placeTower(state, defId, x, y) {
     x,
     y,
     tiers: [0, 0],
+    level: def.hero ? state.heroLevel : 1,
     cooldown: 0,
-    angle: -Math.PI / 2,
+    abilityCd: 0,
+    buffT: 0,
+    buff: null,
+    angle: 0,
     target: def.base.defaultTarget ?? "first",
     shotCount: 0,
     pops: 0,
@@ -77,7 +94,7 @@ export function buyUpgrade(state, tower, pathIndex) {
   if (!up || state.cash < up.cost) return false;
   state.cash -= up.cost;
   tower.tiers[pathIndex]++;
-  state.events.push({ kind: "upgrade", x: tower.x, y: tower.y });
+  state.events.push({ kind: "upgrade", x: tower.x, y: tower.y, name: up.name });
   return true;
 }
 
@@ -88,22 +105,132 @@ export function sellTower(state, tower) {
   state.events.push({ kind: "sell", x: tower.x, y: tower.y });
 }
 
+/** Resolved stats, memoised per tower. This is called for every tower on every
+ * simulation tick *and* every frame (targeting, drawing, the ability bar); at
+ * 3x speed with twenty towers that was a few hundred object rebuilds a second
+ * for numbers that only change when something is bought. */
 export function towerStats(tower) {
-  return resolveStats(TOWER_BY_ID[tower.defId], tower.tiers);
+  const key = `${tower.tiers[0]},${tower.tiers[1]}:${tower.level ?? 1}`;
+  if (tower.statsKey !== key) {
+    tower.statsKey = key;
+    tower.statsCache = resolveStats(TOWER_BY_ID[tower.defId], tower.tiers, tower.level ?? 1);
+  }
+  return tower.statsCache;
 }
 
-export function towerValue(tower) {
-  return investedValue(TOWER_BY_ID[tower.defId], tower.tiers);
+// -------------------------------------------------------------- abilities --
+
+export function abilityOf(tower) {
+  return towerStats(tower).ability ?? null;
+}
+
+export function abilityReady(tower) {
+  return !!abilityOf(tower) && (tower.abilityCd ?? 0) <= 0;
+}
+
+/** Abilities ignore every immunity — a 40-second cooldown that whiffs on a lead
+ * bloon would just be a trap. That is what dmgType "ability" is for. */
+function abilityProjectile(tower, extra) {
+  return {
+    dmgType: "ability",
+    pierce: 9999,
+    owner: tower,
+    hits: new Set(),
+    moabBonus: 0,
+    ...extra,
+  };
+}
+
+export function activateAbility(state, tower) {
+  const ab = abilityOf(tower);
+  if (!ab || (tower.abilityCd ?? 0) > 0) return false;
+  tower.abilityCd = ab.cooldown;
+
+  if (ab.kind === "cash") {
+    state.cash += ab.amount;
+    state.cashEarned += ab.amount;
+    state.events.push({ kind: "income", x: tower.x, y: tower.y, amount: ab.amount });
+  } else if (ab.kind === "buff") {
+    tower.buffT = ab.dur;
+    tower.buff = ab;
+  } else if (ab.kind === "freeze") {
+    for (const b of state.bloons) {
+      if (b.hp <= 0) continue;
+      if (Math.hypot(b.x - tower.x, b.y - tower.y) > ab.radius) continue;
+      const def = BLOONS[b.type];
+      if (def.moab) {
+        b.slowAmt = Math.max(b.slowAmt, ab.moabSlow);
+        b.slowT = Math.max(b.slowT, ab.dur);
+      } else {
+        b.freezeT = Math.max(b.freezeT, ab.dur);
+      }
+    }
+    state.events.push({ kind: "ability", x: tower.x, y: tower.y, r: Math.min(ab.radius, 900), ab: ab.id, color: "#9fe8ff" });
+  } else if (ab.kind === "strike") {
+    // Strongest blimp anywhere, falling back to the strongest bloon on screen.
+    let best = null;
+    let bestKey = -Infinity;
+    for (const b of state.bloons) {
+      if (b.hp <= 0) continue;
+      const key = (BLOONS[b.type].moab ? 1e6 : 0) + b.maxHp * 100 + b.dist;
+      if (key > bestKey) { bestKey = key; best = b; }
+    }
+    if (best) {
+      const proj = abilityProjectile(tower, { damage: ab.dmg });
+      state.events.push({ kind: "snipe", x1: tower.x, y1: tower.y, x2: best.x, y2: best.y });
+      best.slowAmt = Math.max(best.slowAmt, ab.slow);
+      best.slowT = Math.max(best.slowT, ab.dur);
+      damage(state, best, ab.dmg, proj);
+    }
+    state.events.push({ kind: "ability", x: tower.x, y: tower.y, r: 60, ab: ab.id, color: "#fff6b0" });
+  } else if (ab.kind === "nuke") {
+    state.effects.push({
+      x: tower.x, y: tower.y, radius: ab.radius, dmg: ab.dmg,
+      ticksLeft: ab.ticks, interval: ab.ticks > 1 ? ab.dur / ab.ticks : 0.05,
+      t: 0, color: ab.color ?? "#ffb020", owner: tower,
+    });
+    state.events.push({ kind: "ability", x: tower.x, y: tower.y, r: ab.radius, ab: ab.id, color: ab.color ?? "#ffb020" });
+  }
+  return true;
+}
+
+function updateEffects(state, dt) {
+  const alive = [];
+  for (const e of state.effects) {
+    e.t -= dt;
+    while (e.ticksLeft > 0 && e.t <= 0) {
+      e.t += e.interval;
+      e.ticksLeft--;
+      const proj = abilityProjectile(e.owner, { damage: e.dmg });
+      for (const b of state.bloons) {
+        if (b.hp <= 0) continue;
+        if (Math.hypot(b.x - e.x, b.y - e.y) > e.radius + b.r) continue;
+        damage(state, b, e.dmg, proj);
+      }
+      state.events.push({ kind: "blast", x: e.x, y: e.y, r: e.radius, color: e.color });
+    }
+    if (e.ticksLeft > 0) alive.push(e);
+  }
+  state.effects = alive;
 }
 
 // ----------------------------------------------------------------- wave ----
 
+/** A round may be started during the previous one, once everything in it has
+ * spawned. Sending the next wave early is the main way an aggressive player
+ * gets ahead on cash, and it is what stops the mid-game from being a wait. */
+export function canStartRound(state) {
+  if (state.phase === "build") return state.round <= ROUND_COUNT;
+  return false;
+}
+
 export function startRound(state) {
-  if (state.phase !== "build") return false;
+  if (!canStartRound(state)) return false;
   state.schedule = buildSchedule(state.round);
   state.spawnIdx = 0;
   state.waveTime = 0;
   state.phase = "wave";
+  state.events.push({ kind: "roundStart", round: state.round });
   return true;
 }
 
@@ -125,6 +252,8 @@ function spawnBloon(state, type, camo, dist = 0) {
   });
 }
 
+/** Paid out the moment a round has finished spawning, not when the board is
+ * clear — that is what lets the next round overlap the tail of this one. */
 function endRound(state) {
   const payout = Math.round(roundReward(state.round) * state.difficulty.reward);
   state.cash += payout;
@@ -140,12 +269,8 @@ function endRound(state) {
     if (s.lifeGain) state.lives += s.lifeGain;
   }
   state.events.push({ kind: "roundEnd", round: state.round, payout });
-  if (state.round >= ROUND_COUNT) {
-    state.phase = "won";
-  } else {
-    state.round++;
-    state.phase = "build";
-  }
+  state.round++;
+  state.phase = "build";
 }
 
 // --------------------------------------------------------------- damage ----
@@ -161,7 +286,9 @@ function damage(state, bloon, amount, proj) {
   const def = BLOONS[bloon.type];
   // Blimp bonuses: without them the top-tier upgrades cannot keep up with the
   // HP curve of the last five rounds on the shorter maps.
-  bloon.hp -= def.moab && proj.moabBonus ? amount * proj.moabBonus : amount;
+  const dealt = def.moab && proj.moabBonus ? amount * proj.moabBonus : amount;
+  bloon.hp -= dealt;
+  if (def.moab) state.events.push({ kind: "dmg", x: bloon.x, y: bloon.y, amount: Math.round(dealt) });
 
   if (proj.slow) {
     const resist = def.slowResist ?? 1;
@@ -180,6 +307,23 @@ function damage(state, bloon, amount, proj) {
   return true;
 }
 
+/** Hero XP. Everything the defence pops feeds it, so the hero keeps climbing
+ * even while it is not the tower doing the work — the point is a number that
+ * visibly grows across a run, not a second economy to micromanage. */
+function gainXp(state, amount) {
+  if (state.heroLevel >= HERO_MAX_LEVEL) return;
+  state.heroXp += amount;
+  const lvl = heroLevel(state.heroXp);
+  if (lvl === state.heroLevel) return;
+  state.heroLevel = lvl;
+  for (const t of state.towers) {
+    if (t.defId === HERO_ID) {
+      t.level = lvl;
+      state.events.push({ kind: "heroLevel", x: t.x, y: t.y, level: lvl });
+    }
+  }
+}
+
 function popBloon(state, bloon, proj) {
   const def = BLOONS[bloon.type];
   bloon.hp = 0;
@@ -187,6 +331,7 @@ function popBloon(state, bloon, proj) {
   const reward = Math.max(1, Math.round((1 + (def.cashBonus ?? 0)) * state.difficulty.reward));
   state.cash += reward;
   state.cashEarned += reward;
+  gainXp(state, 1 + (def.cashBonus ?? 0) * 2);
   if (proj.owner) proj.owner.pops++;
   state.events.push({
     kind: "pop",
@@ -195,6 +340,7 @@ function popBloon(state, bloon, proj) {
     color: def.color,
     r: bloon.r,
     moab: !!def.moab,
+    reward: def.cashBonus ? reward : 0,
   });
 
   // Children inherit camo and trail slightly behind so they fan out visibly.
@@ -314,7 +460,26 @@ function fire(state, tower, stats, target) {
 
 function updateTowers(state, dt) {
   for (const tower of state.towers) {
-    const stats = towerStats(tower);
+    if (tower.abilityCd > 0) {
+      tower.abilityCd -= dt;
+      if (tower.abilityCd <= 0) {
+        tower.abilityCd = 0;
+        state.events.push({ kind: "abilityReady", x: tower.x, y: tower.y });
+      }
+    }
+
+    const base = towerStats(tower);
+    // An active buff is a temporary copy of the stats, so it expires cleanly
+    // without ever writing back into the tower's real numbers.
+    let stats = base;
+    if (tower.buffT > 0) {
+      tower.buffT -= dt;
+      stats = { ...base };
+      if (tower.buff?.rateMul) stats.rate = (stats.rate ?? 1) * tower.buff.rateMul;
+      if (tower.buff?.pierce) stats.pierce = (stats.pierce ?? 1) + tower.buff.pierce;
+      if (tower.buffT <= 0) tower.buff = null;
+    }
+
     if (stats.support) continue;
     const range = stats.range;
 
@@ -411,7 +576,7 @@ function updateProjectiles(state, dt) {
       if (!spent && p.life <= 0 && p.blast > 0 && p.cluster) spawnCluster(state, p);
       continue;
     }
-    if (p.x < -60 || p.x > 780 || p.y < -60 || p.y > 1240) continue;
+    if (p.x < -60 || p.x > WORLD.w + 60 || p.y < -60 || p.y > WORLD.h + 60) continue;
     alive.push(p);
   }
   state.projectiles = alive;
@@ -488,6 +653,7 @@ export function update(state, realDt) {
   // Bloons move before towers fire so a tower never shoots at a stale position.
   updateBloons(state, dt);
   updateTowers(state, dt);
+  updateEffects(state, dt);
   updateProjectiles(state, dt);
 
   if (state.lives <= 0) {
@@ -497,8 +663,12 @@ export function update(state, realDt) {
     return;
   }
 
-  if (state.phase === "wave" && state.spawnIdx >= state.schedule.length && state.bloons.length === 0) {
-    endRound(state);
+  if (state.phase === "wave" && state.spawnIdx >= state.schedule.length) endRound(state);
+
+  // The run is only won once the last round is both sent and cleaned up.
+  if (state.phase === "build" && state.round > ROUND_COUNT && state.bloons.length === 0) {
+    state.phase = "won";
+    state.events.push({ kind: "won" });
   }
 }
 

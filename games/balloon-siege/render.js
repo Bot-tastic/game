@@ -1,8 +1,17 @@
 // All drawing. Everything is procedural — no image or audio files to 404 on a
-// static host. World coordinates are 720x1180; main.js sets up the transform.
+// static host. World coordinates are WORLD.w x WORLD.h; main.js sets up the
+// transform that maps them onto the canvas.
 
 import { BLOONS, PATH_RADIUS, WORLD } from "./config.js";
 import { TOWER_BY_ID, TOWER_RADIUS, resolveStats } from "./towers.js";
+
+/** Towers placed by the simulation carry a memoised stat block; the placement
+ * ghost is a bare literal and has to be resolved on the spot. */
+function statsFor(tower) {
+  const key = `${tower.tiers[0]},${tower.tiers[1]}:${tower.level ?? 1}`;
+  if (tower.statsKey === key) return tower.statsCache;
+  return resolveStats(TOWER_BY_ID[tower.defId], tower.tiers, tower.level ?? 1);
+}
 
 let mapLayer = null;
 const balloonGradients = new Map();
@@ -224,13 +233,30 @@ export function drawRange(ctx, x, y, range, ok = true) {
   ctx.restore();
 }
 
-export function drawTower(ctx, tower, { selected = false, ghost = false } = {}) {
+export function drawTower(ctx, tower, { selected = false, ghost = false, time = 0 } = {}) {
   const def = TOWER_BY_ID[tower.defId];
-  const stats = resolveStats(def, tower.tiers);
+  const stats = statsFor(tower);
   const tier = tower.tiers[0] + tower.tiers[1];
   ctx.save();
   if (ghost) ctx.globalAlpha = 0.65;
   ctx.translate(tower.x, tower.y);
+
+  // A ready ability is the one thing on the board the player has to notice, so
+  // it gets a pulsing halo rather than a static outline.
+  if (!ghost && stats.ability && (tower.abilityCd ?? 0) <= 0) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 5);
+    ctx.beginPath();
+    ctx.arc(0, 0, TOWER_RADIUS + 5 + pulse * 3, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,209,102,${0.45 + pulse * 0.45})`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  if (!ghost && tower.buffT > 0) {
+    ctx.beginPath();
+    ctx.arc(0, 0, TOWER_RADIUS + 9, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,209,102,0.16)";
+    ctx.fill();
+  }
 
   ctx.beginPath();
   ctx.arc(0, 4, TOWER_RADIUS, 0, Math.PI * 2);
@@ -250,12 +276,12 @@ export function drawTower(ctx, tower, { selected = false, ghost = false } = {}) 
   ctx.beginPath();
   ctx.arc(0, 0, TOWER_RADIUS, 0, Math.PI * 2);
   const grad = ctx.createRadialGradient(-6, -8, 3, 0, 0, TOWER_RADIUS);
-  grad.addColorStop(0, "#3b4354");
-  grad.addColorStop(1, "#1a1f29");
+  grad.addColorStop(0, def.hero ? "#5a4a2a" : "#3b4354");
+  grad.addColorStop(1, def.hero ? "#2a2013" : "#1a1f29");
   ctx.fillStyle = grad;
   ctx.fill();
   ctx.lineWidth = selected ? 3 : 2;
-  ctx.strokeStyle = selected ? "#5ee6c8" : tier > 0 ? "#ffb020" : "rgba(255,255,255,0.22)";
+  ctx.strokeStyle = selected ? "#5ee6c8" : def.hero ? "#ffd166" : tier > 0 ? "#ffb020" : "rgba(255,255,255,0.22)";
   ctx.stroke();
 
   ctx.font = "19px system-ui, sans-serif";
@@ -263,20 +289,49 @@ export function drawTower(ctx, tower, { selected = false, ghost = false } = {}) 
   ctx.textBaseline = "middle";
   ctx.fillText(def.icon, 0, 1);
 
-  // Upgrade pips: one dot per tier bought, so the board is readable at a glance.
-  for (let p = 0; p < 2; p++) {
-    for (let i = 0; i < tower.tiers[p]; i++) {
-      ctx.beginPath();
-      ctx.arc((p === 0 ? -1 : 1) * (7 + i * 6), TOWER_RADIUS + 6, 2.6, 0, Math.PI * 2);
-      ctx.fillStyle = p === 0 ? "#ffb020" : "#5ee6c8";
-      ctx.fill();
+  if (def.hero) {
+    // Level badge instead of upgrade pips — the hero has no bought tiers.
+    ctx.beginPath();
+    ctx.arc(TOWER_RADIUS - 2, -TOWER_RADIUS + 2, 9, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffd166";
+    ctx.fill();
+    ctx.fillStyle = "#2a2013";
+    ctx.font = "800 11px system-ui, sans-serif";
+    ctx.fillText(String(tower.level ?? 1), TOWER_RADIUS - 2, -TOWER_RADIUS + 3);
+  } else {
+    // Upgrade pips: one dot per tier bought, so the board is readable at a glance.
+    for (let p = 0; p < 2; p++) {
+      for (let i = 0; i < tower.tiers[p]; i++) {
+        ctx.beginPath();
+        ctx.arc((p === 0 ? -1 : 1) * (7 + i * 6), TOWER_RADIUS + 6, 2.6, 0, Math.PI * 2);
+        ctx.fillStyle = p === 0 ? "#ffb020" : "#5ee6c8";
+        ctx.fill();
+      }
     }
   }
   ctx.restore();
 }
 
-export function drawTowers(ctx, state, selected) {
-  for (const t of state.towers) drawTower(ctx, t, { selected: t === selected });
+export function drawTowers(ctx, state, selected, time = 0) {
+  for (const t of state.towers) drawTower(ctx, t, { selected: t === selected, time });
+}
+
+/** Ongoing ability areas (Firestorm, Sun Blast, a missile salvo) so the player
+ * can see where the damage is actually landing while it ticks. */
+export function drawEffects(ctx, state, time) {
+  for (const e of state.effects) {
+    ctx.save();
+    ctx.globalAlpha = 0.14 + 0.06 * Math.sin(time * 9);
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = e.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 // ----------------------------------------------------------- projectiles ---
