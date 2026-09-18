@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Balloon Siege</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="game-page">
+  <div class="stage">
+    <div class="board" id="board">
+      <canvas id="map-layer" aria-hidden="true"></canvas>
+      <canvas id="game"></canvas>
+
+      <header class="topbar safe-area" id="topbar-row">
+        <a class="hud-back" href="../../index.html">&larr; Games</a>
+        <div class="stats">
+          <div class="stat-chip stat-chip--lives"><span class="k">♥</span><span class="v" id="lives-value">100</span></div>
+          <div class="stat-chip stat-chip--cash"><span class="k">$</span><span class="v" id="cash-value">650</span></div>
+          <div class="stat-chip"><span class="k">Round</span><span class="v" id="round-value">1/40</span></div>
+        </div>
+      </header>
+
+      <div class="wave-bar" id="wave-bar" hidden><div class="wave-fill" id="wave-fill"></div></div>
+
+      <div class="round-controls" id="round-controls">
+        <div class="preview" id="preview"></div>
+        <div class="round-buttons">
+          <button class="btn btn--primary btn--go" id="start-btn">Start Round</button>
+          <button class="chip-btn" id="speed-btn" aria-label="Game speed">1x</button>
+          <button class="chip-btn" id="auto-btn" aria-pressed="false" aria-label="Auto start rounds">Auto</button>
+          <button class="chip-btn" id="mute-btn" aria-label="Toggle sound">♪</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shop / selection dock ------------------------------------------- -->
+    <div class="dock safe-area" id="dock">
+      <div class="shop" id="shop"></div>
+
+      <div class="inspector" id="inspector" hidden>
+        <div class="inspector-head">
+          <span class="insp-icon" id="insp-icon">🎯</span>
+          <div class="insp-title">
+            <h3 id="insp-name">Dart Monkey</h3>
+            <p id="insp-detail">Damage 1 · Range 118</p>
+          </div>
+          <button class="chip-btn" id="target-btn">First</button>
+        </div>
+        <div class="upgrades">
+          <button class="upgrade" id="up-0">
+            <span class="up-path" id="up-0-path">Sharpshooter</span>
+            <span class="up-name" id="up-0-name">Razor Darts</span>
+            <span class="up-desc" id="up-0-desc"></span>
+            <span class="up-cost" id="up-0-cost">$120</span>
+          </button>
+          <button class="upgrade" id="up-1">
+            <span class="up-path" id="up-1-path">Scout</span>
+            <span class="up-name" id="up-1-name">Long Range</span>
+            <span class="up-desc" id="up-1-desc"></span>
+            <span class="up-cost" id="up-1-cost">$110</span>
+          </button>
+        </div>
+        <div class="insp-actions">
+          <button class="chip-btn chip-btn--danger" id="sell-btn">Sell $150</button>
+          <button class="chip-btn" id="close-insp">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="hint-bar" id="hint-bar" hidden></div>
+
+  <!-- Menu -------------------------------------------------------------- -->
+  <section class="overlay overlay--menu" id="menu-overlay">
+    <div class="menu-inner">
+      <h1 class="logo">BALLOON<span>SIEGE</span></h1>
+      <p class="tagline">Build the gauntlet. Pop everything. 40 rounds.</p>
+
+      <h2 class="section-label">Map</h2>
+      <div class="map-grid" id="map-grid"></div>
+
+      <h2 class="section-label">Difficulty</h2>
+      <div class="diff-row" id="diff-row"></div>
+
+      <button class="btn btn--primary btn--wide" id="play-btn">Play</button>
+      <p class="best-line" id="best-line"></p>
+    </div>
+  </section>
+
+  <!-- Pause ------------------------------------------------------------- -->
+  <section class="overlay" id="pause-overlay" hidden>
+    <h2>Paused</h2>
+    <p class="stat">Round <strong id="pause-round">1</strong></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="resume-btn">Resume</button>
+      <button class="btn btn--ghost" id="quit-btn">Quit to menu</button>
+    </div>
+  </section>
+
+  <!-- End --------------------------------------------------------------- -->
+  <section class="overlay" id="end-overlay" hidden>
+    <h2 id="end-title">Defeat</h2>
+    <p class="stat">Reached round <strong id="end-round">1</strong></p>
+    <p class="stat">Bloons popped <strong id="end-pops">0</strong></p>
+    <p class="stat" id="end-best"></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="retry-btn">Play again</button>
+      <button class="btn btn--ghost" id="menu-btn">Menu</button>
+    </div>
+  </section>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
