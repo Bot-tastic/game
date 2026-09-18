@@ -1,5 +1,11 @@
-/* Balloon Siege — layout is a column: the board takes whatever height is left
-   after the dock, and the canvas letterboxes the 720x1180 world inside it. */
+/* Balloon Siege.
+   The world is landscape (1280x720). Two layouts share one markup:
+   - wide viewports (body.wide): board left, control dock as a right sidebar.
+     The board keeps almost the full height, which is the point of the whole
+     landscape rewrite — on a desktop window a portrait board was a thin strip.
+   - narrow viewports: board on top at its natural aspect, dock fills the rest.
+     main.js sets the board height there, so the dock never has to fight the
+     canvas for space. */
 
 .stage {
   position: fixed;
@@ -8,13 +14,20 @@
   flex-direction: column;
 }
 
+body.wide .stage { flex-direction: row; }
+
+/* Narrow layouts: main.js sets an explicit board height, so the board must not
+   grow past it or the map floats in a band of dead black. Wide layouts let it
+   take every pixel the sidebar leaves. */
 .board {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
   overflow: hidden;
   background: #0a0c11;
 }
+
+body.wide .board { flex: 1 1 auto; height: auto; }
 
 #map-layer {
   position: absolute;
@@ -41,30 +54,29 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   pointer-events: none;
   z-index: 5;
 }
 
-.topbar > * {
-  pointer-events: auto;
-}
+.topbar > * { pointer-events: auto; }
 
 .stats {
   display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .stat-chip {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 5px;
   background: rgba(12, 15, 21, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 5px 12px;
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(6px);
 }
@@ -76,57 +88,127 @@
   color: var(--fg-1);
 }
 
-.stat-chip .v {
-  font-size: 16px;
-  font-weight: 800;
-}
+.stat-chip .v { font-size: 15px; font-weight: 800; }
 
 .stat-chip--lives .k { color: #ff5d8f; font-size: 14px; }
 .stat-chip--cash .k { color: #ffd166; font-size: 14px; }
+.stat-chip--hero { border-color: rgba(255, 209, 102, 0.45); }
+.stat-chip--hero .k { font-size: 15px; }
+.stat-chip--hero .v { color: #ffd166; }
+.stat-chip--hero[hidden] { display: none; }
+
+.stat-chip--hero .xp {
+  width: 42px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.stat-chip--hero .xp i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #ffd166;
+}
+
 .stat-chip--lives.low { animation: pulse-warn 0.8s ease infinite; }
 
 @keyframes pulse-warn {
   50% { border-color: #ff5d8f; background: rgba(90, 20, 40, 0.85); }
 }
 
-/* ---- Wave progress ---- */
-.wave-bar {
-  position: absolute;
-  left: var(--space-4);
-  right: var(--space-4);
-  bottom: 84px;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.5);
+/* ---- Dock ---- */
+.dock {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--bg-1);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+body.wide .dock {
+  flex: 0 0 auto;
+  width: 224px;
+  border-top: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: var(--space-3);
+}
+
+/* ---- Activated abilities ---- */
+.abilities {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.abilities:empty { display: none; }
+
+.ability {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-family: var(--font-family);
+  font-size: 23px;
+  line-height: 1;
+  cursor: pointer;
   overflow: hidden;
-  z-index: 4;
+  display: grid;
+  place-items: center;
 }
 
-.wave-bar[hidden] { display: none; }
-
-.wave-fill {
-  height: 100%;
-  width: 0;
-  background: linear-gradient(90deg, var(--accent), #ffd166);
-  transition: width 0.15s linear;
-}
-
-/* ---- Round controls ---- */
-.round-controls {
+/* Cooldown shade drains from the bottom as --cd goes 1 -> 0. */
+.ability::after {
+  content: "";
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
+  height: calc(var(--cd, 0) * 100%);
+  background: rgba(6, 8, 12, 0.76);
+  pointer-events: none;
+}
+
+.ability.ready {
+  border-color: #ffd166;
+  box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.7);
+  animation: ability-pulse 1.4s ease-out infinite;
+}
+
+@keyframes ability-pulse {
+  70% { box-shadow: 0 0 0 9px rgba(255, 209, 102, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 209, 102, 0); }
+}
+
+.ability .ab-secs {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+  z-index: 2;
+}
+
+.ability.ready .ab-secs { display: none; }
+
+/* ---- Round controls ---- */
+.round-controls {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  z-index: 5;
-  pointer-events: none;
 }
-
-.round-controls > * { pointer-events: auto; }
 
 .preview {
   display: flex;
@@ -145,7 +227,7 @@
   font-weight: 700;
   padding: 3px 8px 3px 4px;
   border-radius: 999px;
-  background: rgba(12, 15, 21, 0.85);
+  background: var(--bg-2);
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -158,16 +240,40 @@
 
 .pv.camo { border-color: #7dff9e; color: #7dff9e; }
 
-.round-buttons {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
+.wave-bar {
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
 }
 
+.wave-bar[hidden] { display: none; }
+
+.wave-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--accent), #ffd166);
+  transition: width 0.15s linear;
+}
+
+/* Start on its own full-width row, the three toggles below it: squeezing all
+   four into one row clipped the button label at every dock width. */
+.round-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.round-buttons .btn--go { grid-column: 1 / -1; }
+
 .btn--go {
-  min-height: 46px;
-  padding: var(--space-2) var(--space-5);
-  font-size: 17px;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-2);
+  font-size: 15px;
+  white-space: nowrap;
   box-shadow: 0 6px 20px rgba(94, 230, 200, 0.28);
 }
 
@@ -177,17 +283,25 @@
   box-shadow: none;
 }
 
+/* Sending the next wave while the current one is still walking is the main
+   aggressive play, so the button advertises it instead of greying out. */
+.btn--go.early {
+  background: #ffb020;
+  color: #241701;
+  box-shadow: 0 6px 20px rgba(255, 176, 32, 0.3);
+}
+
 .chip-btn {
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(12, 15, 21, 0.85);
+  background: var(--bg-2);
   color: var(--fg-0);
   font-family: var(--font-family);
   font-size: 13px;
   font-weight: 700;
-  min-height: 46px;
-  min-width: 46px;
-  padding: 0 12px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
@@ -202,27 +316,21 @@
 .chip-btn--danger { color: #ff8fa9; border-color: rgba(255, 93, 143, 0.4); }
 .chip-btn:disabled { opacity: 0.4; }
 
-/* ---- Dock ---- */
-.dock {
-  flex: 0 0 auto;
-  background: var(--bg-1);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding: var(--space-2) var(--space-2) var(--space-3);
-}
-
+/* ---- Shop ---- */
+/* A wrapping grid in both layouts: a horizontal scroller left most of a
+   portrait dock empty and hid half the roster behind a swipe. */
 .shop {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: var(--space-2);
-  overflow-x: auto;
-  scrollbar-width: none;
   padding: 2px;
+  align-content: start;
 }
 
-.shop::-webkit-scrollbar { display: none; }
+body.wide .shop { grid-template-columns: 1fr 1fr; }
 
 .shop-item {
-  flex: 0 0 auto;
-  width: 78px;
+  width: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -236,12 +344,17 @@
   cursor: pointer;
 }
 
+
+
 .shop-item .si-icon { font-size: 24px; line-height: 1.1; }
 .shop-item .si-name { font-size: 10px; font-weight: 700; text-align: center; line-height: 1.15; }
 .shop-item .si-cost { font-size: 12px; font-weight: 800; color: #ffd166; font-variant-numeric: tabular-nums; }
 .shop-item.selected { border-color: var(--accent); background: #17303396; }
 .shop-item.poor { opacity: 0.45; }
 .shop-item.poor .si-cost { color: #ff8fa9; }
+.shop-item.gone { opacity: 0.3; }
+.shop-item--hero { border-color: rgba(255, 209, 102, 0.4); }
+.shop-item--hero .si-cost { color: #ffd166; }
 
 /* ---- Inspector ---- */
 .inspector[hidden] { display: none; }
@@ -249,13 +362,13 @@
 .inspector-head {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-2) var(--space-2);
+  gap: var(--space-2);
+  padding: 0 var(--space-1) var(--space-2);
 }
 
 .insp-icon { font-size: 26px; }
 .insp-title { flex: 1; min-width: 0; }
-.insp-title h3 { font-size: 16px; }
+.insp-title h3 { font-size: 15px; }
 .insp-title p { font-size: 11px; color: var(--fg-1); }
 
 .upgrades {
@@ -263,6 +376,8 @@
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
 }
+
+.upgrades[hidden] { display: none; }
 
 .upgrade {
   display: flex;
@@ -287,6 +402,31 @@
 .upgrade.affordable { border-color: rgba(94, 230, 200, 0.5); }
 .upgrade.too-dear .up-cost { color: #ff8fa9; }
 
+/* ---- Hero panel ---- */
+.hero-panel[hidden] { display: none; }
+
+.hero-panel {
+  background: var(--bg-2);
+  border: 1px solid rgba(255, 209, 102, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.hp-row { display: flex; justify-content: space-between; font-size: 12px; }
+.hp-row strong { color: #ffd166; }
+.hp-row span { color: var(--fg-1); }
+
+.hp-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.hp-bar i { display: block; height: 100%; width: 0; background: #ffd166; }
+.hp-perk { font-size: 10px; color: var(--fg-1); line-height: 1.3; }
+
 .insp-actions {
   display: flex;
   gap: var(--space-2);
@@ -300,7 +440,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 50%;
+  top: 16%;
   background: rgba(12, 15, 21, 0.92);
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
@@ -314,11 +454,11 @@
 .hint-bar[hidden] { display: none; }
 
 /* ---- Menu ---- */
-.overlay--menu { justify-content: flex-start; overflow-y: auto; padding-top: max(var(--space-6), env(safe-area-inset-top)); }
+.overlay--menu { justify-content: flex-start; overflow-y: auto; padding-top: max(var(--space-5), env(safe-area-inset-top)); }
 
 .menu-inner {
   width: 100%;
-  max-width: 460px;
+  max-width: 720px;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -327,7 +467,7 @@
 }
 
 .logo {
-  font-size: clamp(30px, 9vw, 46px);
+  font-size: clamp(28px, 8vw, 46px);
   font-weight: 900;
   letter-spacing: -0.02em;
   line-height: 1;
@@ -342,7 +482,7 @@
   letter-spacing: 0.12em;
   color: var(--fg-1);
   text-align: left;
-  margin-top: var(--space-2);
+  margin-top: var(--space-1);
 }
 
 .map-grid {
@@ -354,10 +494,10 @@
 .map-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   align-items: flex-start;
   text-align: left;
-  padding: var(--space-3);
+  padding: var(--space-2);
   border-radius: var(--radius-md);
   background: var(--bg-1);
   border: 2px solid transparent;
@@ -376,7 +516,7 @@
 
 .diff-card {
   flex: 1;
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--bg-1);
   border: 2px solid transparent;
@@ -389,10 +529,34 @@
 .diff-card .dc-name { display: block; font-size: 14px; font-weight: 800; }
 .diff-card .dc-sub { display: block; font-size: 10px; color: var(--fg-1); margin-top: 2px; }
 
-.btn--wide { width: 100%; margin-top: var(--space-3); }
+.btn--wide { width: 100%; margin-top: var(--space-2); }
 .best-line { font-size: 12px; }
+.rotate-note { font-size: 12px; color: #ffd166; }
+.rotate-note[hidden] { display: none; }
 
-@media (min-height: 780px) {
-  .shop-item { width: 86px; }
-  .upgrade { min-height: 88px; }
+@media (min-width: 1100px) {
+  body.wide .dock { width: 268px; }
+}
+
+@media (min-width: 760px) {
+  .map-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+.hud-back { white-space: nowrap; }
+
+/* A phone in portrait has no room for a full HUD row, and a wrapped top bar
+   eats board height. Everything non-essential shrinks or goes. */
+@media (max-width: 480px) {
+  .hud-back { font-size: 12px; padding: 6px 10px; }
+  .stat-chip { padding: 4px 8px; gap: 3px; }
+  .stat-chip .k { font-size: 9px; }
+  .stat-chip .v { font-size: 13px; }
+  .stat-chip--hero .xp { display: none; }
+}
+
+/* Very short viewports (a phone in landscape) cannot spare a line of chrome. */
+@media (max-height: 430px) {
+  .stat-chip { padding: 3px 9px; }
+  .stat-chip .v { font-size: 13px; }
+  .topbar { padding: 6px var(--space-2); }
 }

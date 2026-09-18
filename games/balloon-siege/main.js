@@ -4,11 +4,17 @@
 import { createLoop, lockViewport, loadHighScore, onPointer, saveHighScore, showToast } from "../../shared/game-utils.js";
 import { BLOONS, DIFFICULTIES, MAPS, WORLD } from "./config.js";
 import { buildPath } from "./path.js";
-import { ROUND_COUNT, roundPreview } from "./rounds.js";
-import { TOWERS, TOWER_BY_ID, TOWER_RADIUS, nextUpgrade, sellValue, upgradeBlocked } from "./towers.js";
-import { TARGET_MODES, buyUpgrade, canPlace, createGame, placeTower, sellTower, startRound, towerStats, update } from "./game.js";
-import { drawBloons, drawProjectiles, drawRange, drawTower, drawTowers, invalidateMapLayer, paintMapInto } from "./render.js";
-import { createFx, drawFx, handleEvent, updateFx } from "./fx.js";
+import { ROUND_COUNT, ROUND_TITLES, roundPreview } from "./rounds.js";
+import {
+  ALL_TOWERS, HERO, HERO_ID, HERO_MAX_LEVEL, TOWER_BY_ID, TOWER_RADIUS,
+  heroProgress, nextUpgrade, sellValue, upgradeBlocked,
+} from "./towers.js";
+import {
+  TARGET_MODES, abilityOf, activateAbility, alreadyPlaced, buyUpgrade, canPlace, canStartRound,
+  createGame, placeTower, sellTower, startRound, towerStats, update,
+} from "./game.js";
+import { drawBloons, drawEffects, drawProjectiles, drawRange, drawTower, drawTowers, invalidateMapLayer, paintMapInto } from "./render.js";
+import { createFx, drawFx, drawOverlayFx, handleEvent, updateFx } from "./fx.js";
 import { isMuted, resumeAudio, setMuted, sfx } from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
@@ -16,11 +22,14 @@ const SPEEDS = [1, 2, 3];
 const FIXED_DT = 1 / 60;
 // Cap the backlog so a backgrounded tab does not resolve ten rounds at once.
 const MAX_CATCHUP = 0.5;
+// Narrow layouts need enough dock left for the shop and an open upgrade panel.
+const MIN_DOCK_H = 232;
 const BEST_KEY = (map, diff) => `balloon-siege:best:${map}:${diff}`;
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
 const mapCanvas = $("map-layer");
+const board = $("board");
 
 let state = null;
 let fx = createFx();
@@ -34,26 +43,54 @@ let autoTimer = 0;
 let accumulator = 0;
 let shopItems = [];
 let livesChip = null;
+// The ability bar is rebuilt only when the set of abilities changes; its
+// cooldown shading is refreshed every frame, which has to stay cheap.
+let abilityRows = [];
+let abilitySig = "";
 
 let chosenMap = MAPS[0].id;
 let chosenDiff = "normal";
 
 // ------------------------------------------------------------- viewport ----
 
+/** Pick the layout, then size the canvas inside whatever box it ended up with.
+ * Wide viewports get the dock as a sidebar; narrow ones get the board sized to
+ * its own aspect ratio so the dock keeps a usable share of the screen. */
+function layout() {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const wide = W > H * 1.15;
+  document.body.classList.toggle("wide", wide);
+  if (wide) {
+    board.style.height = "";
+  } else {
+    const topInset = ($("topbar-row").offsetHeight || 46) + 6;
+    const maxBoard = Math.max(160, H - MIN_DOCK_H);
+    const scale = Math.min(W / WORLD.w, (maxBoard - topInset) / WORLD.h);
+    board.style.height = `${Math.round(WORLD.h * scale + topInset)}px`;
+  }
+  resize();
+}
+
+const MAX_CANVAS_PX = 2_100_000;
+
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
   const rect = canvas.getBoundingClientRect();
   const w = Math.max(1, Math.round(rect.width));
   const h = Math.max(1, Math.round(rect.height));
+  // Canvas 2D is fill-rate bound: measured framerate here is very nearly
+  // inversely proportional to the backing-store pixel count, so cap it rather
+  // than letting a 3x-DPI phone render four million pixels a frame.
+  let dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  if (w * h * dpr * dpr > MAX_CANVAS_PX) dpr = Math.max(1, Math.sqrt(MAX_CANVAS_PX / (w * h)));
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
   view.w = w;
   view.h = h;
-  // Keep the whole playfield clear of the HUD and the round controls: both
-  // float over the board, and a tower built underneath them is unreachable.
-  const topInset = $("topbar-row").offsetHeight + 6;
-  const bottomInset = $("round-controls").offsetHeight + 6;
-  const avail = Math.max(1, h - topInset - bottomInset);
+  // Keep the playfield clear of the HUD: it floats over the board, and a tower
+  // built underneath it would be unreachable.
+  const topInset = ($("topbar-row").offsetHeight || 46) + 6;
+  const avail = Math.max(1, h - topInset);
   view.scale = Math.min(w / WORLD.w, avail / WORLD.h);
   view.ox = (w - WORLD.w * view.scale) / 2;
   view.oy = topInset + (avail - WORLD.h * view.scale) / 2;
@@ -62,8 +99,8 @@ function resize() {
   positionMapLayer();
 }
 
-window.addEventListener("resize", resize);
-window.addEventListener("orientationchange", resize);
+window.addEventListener("resize", layout);
+window.addEventListener("orientationchange", layout);
 
 /** Line the static map layer up exactly with the letterboxed world rect. */
 function positionMapLayer() {
@@ -81,8 +118,8 @@ function toWorld(x, y) {
 
 /** Tiny map thumbnail so the player can see the track before committing. */
 function drawThumb(cv, map) {
-  const W = 180;
-  const H = 180 * (WORLD.h / WORLD.w);
+  const W = 240;
+  const H = 240 * (WORLD.h / WORLD.w);
   cv.width = W;
   cv.height = H;
   const c = cv.getContext("2d");
@@ -93,7 +130,7 @@ function drawThumb(cv, map) {
   c.beginPath();
   c.moveTo(path.points[0][0] * s, path.points[0][1] * s);
   for (let i = 1; i < path.points.length; i++) c.lineTo(path.points[i][0] * s, path.points[i][1] * s);
-  c.lineWidth = 12 * s;
+  c.lineWidth = 14 * s;
   c.lineCap = "round";
   c.lineJoin = "round";
   c.strokeStyle = map.track;
@@ -156,6 +193,7 @@ function refreshMenu() {
   }
   const best = loadHighScore(BEST_KEY(chosenMap, chosenDiff), 0);
   $("best-line").textContent = best > 0 ? `Best on this map: round ${best}` : "No run here yet.";
+  $("rotate-note").hidden = window.innerWidth > window.innerHeight;
 }
 
 // ----------------------------------------------------------------- shop ----
@@ -163,9 +201,9 @@ function refreshMenu() {
 function buildShop() {
   const shop = $("shop");
   shop.innerHTML = "";
-  for (const def of TOWERS) {
+  for (const def of ALL_TOWERS) {
     const item = document.createElement("button");
-    item.className = "shop-item";
+    item.className = `shop-item${def.hero ? " shop-item--hero" : ""}`;
     item.type = "button";
     item.dataset.tower = def.id;
     item.innerHTML = `<span class="si-icon"></span><span class="si-name"></span><span class="si-cost"></span>`;
@@ -176,6 +214,10 @@ function buildShop() {
       resumeAudio();
       if (selection.placing === def.id) {
         selection.placing = null;
+      } else if (alreadyPlaced(state, def.id)) {
+        sfx.denied();
+        showToast($("toast"), "Only one hero per run");
+        return;
       } else if (state.cash < def.cost) {
         sfx.denied();
         showToast($("toast"), "Not enough cash");
@@ -196,15 +238,11 @@ function refreshDock() {
   $("inspector").hidden = !inspecting;
   $("shop").hidden = inspecting;
 
-  for (const el of shopItems) {
-    const def = TOWER_BY_ID[el.dataset.tower];
-    el.classList.toggle("selected", selection.placing === def.id);
-    el.classList.toggle("poor", state.cash < def.cost);
-  }
+  refreshAffordability();
 
   $("hint-bar").hidden = !selection.placing;
   if (selection.placing) {
-    $("hint-bar").textContent = `Tap a green spot to build the ${TOWER_BY_ID[selection.placing].name}`;
+    $("hint-bar").textContent = `Tap a clear spot to build the ${TOWER_BY_ID[selection.placing].name}`;
   }
 
   if (inspecting) refreshInspector();
@@ -232,6 +270,21 @@ function refreshInspector() {
   $("target-btn").disabled = !!stats.support;
   $("sell-btn").textContent = `Sell $${sellValue(def, tower.tiers)}`;
 
+  // The hero has no bought upgrades: it shows its level track instead.
+  $("upgrades").hidden = !def.paths.length;
+  $("hero-panel").hidden = !def.hero;
+  if (def.hero) {
+    const prog = heroProgress(state.heroXp);
+    $("hp-level").textContent = `Level ${state.heroLevel}`;
+    $("hp-next").textContent = prog ? `${Math.floor(prog.have)}/${prog.need} XP` : "Max level";
+    $("hp-fill").style.width = prog ? `${Math.min(100, (prog.have / prog.need) * 100)}%` : "100%";
+    const nextPerk = HERO.levels[state.heroLevel - 1];
+    $("hp-perk").textContent = nextPerk
+      ? `Next: ${nextPerk.name} — ${nextPerk.desc}`
+      : "Every perk unlocked.";
+    return;
+  }
+
   for (let p = 0; p < 2; p++) {
     const btn = $(`up-${p}`);
     const up = nextUpgrade(def, tower.tiers, p);
@@ -251,6 +304,59 @@ function refreshInspector() {
     const affordable = !blocked && state.cash >= up.cost;
     btn.disabled = !!blocked;
     btn.className = `upgrade${affordable ? " affordable" : ""}${!blocked && !affordable ? " too-dear" : ""}`;
+  }
+}
+
+// ------------------------------------------------------------ abilities ----
+
+/** Rebuild the ability bar only when the set of abilities actually changes —
+ * this runs off the frame loop, so it has to be a cheap no-op most frames. */
+function syncAbilityBar() {
+  const owners = state.towers.filter((t) => abilityOf(t));
+  const sig = owners.map((t) => `${t.id}:${abilityOf(t).id}`).join("|");
+  if (sig === abilitySig) return;
+  abilitySig = sig;
+  const bar = $("ability-bar");
+  bar.innerHTML = "";
+  abilityRows = owners.map((tower) => {
+    const ab = abilityOf(tower);
+    const btn = document.createElement("button");
+    btn.className = "ability";
+    btn.type = "button";
+    btn.title = ab.name;
+    btn.setAttribute("aria-label", ab.name);
+    btn.append(document.createTextNode(ab.icon));
+    const secs = document.createElement("span");
+    secs.className = "ab-secs";
+    btn.append(secs);
+    btn.addEventListener("click", () => {
+      resumeAudio();
+      if (activateAbility(state, tower)) {
+        sfx.ability();
+        showToast($("toast"), ab.name);
+      } else {
+        sfx.denied();
+      }
+    });
+    bar.append(btn);
+    return { tower, ab, btn, secs, shownCd: -1, shownReady: null };
+  });
+}
+
+function refreshAbilityBar() {
+  for (const row of abilityRows) {
+    const left = Math.max(0, row.tower.abilityCd ?? 0);
+    const ready = left <= 0;
+    if (ready !== row.shownReady) {
+      row.shownReady = ready;
+      row.btn.classList.toggle("ready", ready);
+    }
+    const whole = Math.ceil(left);
+    if (whole !== row.shownCd) {
+      row.shownCd = whole;
+      row.secs.textContent = ready ? "" : String(whole);
+      row.btn.style.setProperty("--cd", (left / row.ab.cooldown).toFixed(2));
+    }
   }
 }
 
@@ -301,10 +407,7 @@ function bindInput() {
 function refreshPreview() {
   const box = $("preview");
   box.innerHTML = "";
-  if (state.phase !== "build") {
-    resize();
-    return;
-  }
+  if (state.round > ROUND_COUNT) return;
   for (const { type, camo } of roundPreview(state.round)) {
     const chip = document.createElement("span");
     chip.className = `pv${camo ? " camo" : ""}`;
@@ -313,10 +416,9 @@ function refreshPreview() {
     chip.append(dot, document.createTextNode(camo ? `${type} camo` : type));
     box.append(chip);
   }
-  resize();
 }
 
-const hudShown = { lives: null, cash: null, round: null, running: null, wave: null, poor: null };
+const hudShown = { lives: null, cash: null, round: null, running: null, wave: null, hero: null, xp: null };
 
 function refreshHud() {
   if (hudShown.lives !== state.lives) {
@@ -329,18 +431,41 @@ function refreshHud() {
     $("cash-value").textContent = state.cash;
     refreshAffordability();
   }
-  if (hudShown.round !== state.round) {
-    hudShown.round = state.round;
-    $("round-value").textContent = `${Math.min(state.round, ROUND_COUNT)}/${ROUND_COUNT}`;
+  const shownRound = Math.min(state.round, ROUND_COUNT);
+  if (hudShown.round !== shownRound) {
+    hudShown.round = shownRound;
+    $("round-value").textContent = `${shownRound}/${ROUND_COUNT}`;
+    // Rounds advance inside update() now, not only through beginRound, so the
+    // "what is coming" chips have to follow the counter rather than the button.
+    refreshPreview();
+  }
+
+  const hasHero = state.towers.some((t) => t.defId === HERO_ID);
+  $("hero-chip").hidden = !hasHero;
+  if (hasHero) {
+    if (hudShown.hero !== state.heroLevel) {
+      hudShown.hero = state.heroLevel;
+      $("hero-level").textContent = state.heroLevel;
+    }
+    const prog = heroProgress(state.heroXp);
+    const pct = prog ? Math.round((prog.have / prog.need) * 100) : 100;
+    if (hudShown.xp !== pct) {
+      hudShown.xp = pct;
+      $("hero-xp").style.width = `${pct}%`;
+    }
   }
 
   const running = state.phase === "wave";
-  if (hudShown.running !== running) {
-    hudShown.running = running;
+  const canStart = canStartRound(state);
+  const early = state.bloons.length > 0 && canStart;
+  const key = `${running}:${early}:${canStart}`;
+  if (hudShown.running !== key) {
+    hudShown.running = key;
     const btn = $("start-btn");
     btn.classList.toggle("running", running);
-    btn.textContent = running ? "In progress" : "Start Round";
-    btn.disabled = running;
+    btn.classList.toggle("early", early);
+    btn.textContent = running ? "Sending…" : early ? "Send next" : "Start Round";
+    btn.disabled = !canStart;
     $("wave-bar").hidden = !running;
   }
   if (running) {
@@ -355,19 +480,25 @@ function refreshHud() {
 /** Shop affordability and the open upgrade panel both depend only on cash. */
 function refreshAffordability() {
   for (const el of shopItems) {
-    el.classList.toggle("poor", state.cash < TOWER_BY_ID[el.dataset.tower].cost);
+    const def = TOWER_BY_ID[el.dataset.tower];
+    const gone = alreadyPlaced(state, def.id);
+    el.classList.toggle("selected", selection.placing === def.id);
+    el.classList.toggle("gone", gone);
+    el.classList.toggle("poor", !gone && state.cash < def.cost);
   }
   if (selection.tower) refreshInspector();
 }
 
 function beginRound() {
-  if (state.phase !== "build") return;
+  if (!canStartRound(state)) return;
   selection.placing = null;
+  const round = state.round;
   startRound(state);
   sfx.roundStart();
   refreshDock();
   refreshHud();
   refreshPreview();
+  return round;
 }
 
 // ------------------------------------------------------------------ flow ---
@@ -380,11 +511,14 @@ function newGame() {
   paused = false;
   autoTimer = 0;
   accumulator = 0;
+  abilitySig = "none";
+  abilityRows = [];
+  $("ability-bar").innerHTML = "";
   $("menu-overlay").hidden = true;
   $("end-overlay").hidden = true;
   $("pause-overlay").hidden = true;
   invalidateMapLayer();
-  resize();
+  layout();
   buildShop();
   refreshDock();
   refreshHud();
@@ -392,7 +526,7 @@ function newGame() {
 }
 
 function endGame() {
-  const reached = state.phase === "won" ? ROUND_COUNT : state.round;
+  const reached = state.phase === "won" ? ROUND_COUNT : Math.min(state.round, ROUND_COUNT);
   const key = BEST_KEY(state.map.id, state.difficulty.id);
   const best = loadHighScore(key, 0);
   if (reached > best) saveHighScore(key, reached);
@@ -400,6 +534,7 @@ function endGame() {
   $("end-title").textContent = state.phase === "won" ? "Map cleared!" : "Overrun";
   $("end-round").textContent = `${reached}/${ROUND_COUNT}`;
   $("end-pops").textContent = state.popsTotal;
+  $("end-hero").textContent = `${state.heroLevel}/${HERO_MAX_LEVEL}`;
   $("end-best").textContent = reached > best ? "New best on this map!" : `Best here: round ${Math.max(best, reached)}`;
   $("end-overlay").hidden = false;
   if (state.phase === "won") sfx.victory();
@@ -408,23 +543,35 @@ function endGame() {
 
 function drainEvents() {
   for (const ev of state.events) {
+    if (ev.kind === "roundStart") {
+      handleEvent(fx, { ...ev, title: `Round ${ev.round}`, sub: ROUND_TITLES[ev.round] ?? "" });
+      continue;
+    }
     handleEvent(fx, ev);
     if (ev.kind === "pop") (ev.moab ? sfx.moabPop() : sfx.pop());
     else if (ev.kind === "shoot") sfx.shoot();
     else if (ev.kind === "blast") sfx.blast();
     else if (ev.kind === "leak") sfx.leak();
     else if (ev.kind === "roundEnd") sfx.roundEnd();
+    else if (ev.kind === "heroLevel") sfx.upgrade();
   }
   state.events.length = 0;
 }
 
+/** True while the menu, pause or end screen covers the board. Nothing behind an
+ * overlay is worth simulating or drawing, and the menu in particular was
+ * burning a full frame budget rendering a board nobody could see. */
+function overlayUp() {
+  return !$("menu-overlay").hidden || !$("end-overlay").hidden || !$("pause-overlay").hidden;
+}
+
 function step(dt) {
+  if (overlayUp()) return;
   time += dt;
   updateFx(fx, dt);
   if (!state || paused) return;
   if (state.phase === "won" || state.phase === "lost") return;
 
-  const wasPhase = state.phase;
   // Fixed timestep: the simulation must behave the same on a 30fps phone as on
   // a 120fps one, and fast-forward must not coarsen collision detection.
   accumulator = Math.min(accumulator + dt * SPEEDS[speedIndex], MAX_CATCHUP);
@@ -435,24 +582,30 @@ function step(dt) {
   }
   drainEvents();
 
-  if (wasPhase === "wave" && state.phase === "build") {
-    refreshPreview();
+  // Auto-start waits for a clear board. Sending a wave early is meant to be a
+  // deliberate risk, not something a toggle does on the player's behalf.
+  if (state.phase === "build" && autoStart && state.bloons.length === 0) {
+    autoTimer += dt;
+    if (autoTimer > 1) {
+      autoTimer = 0;
+      beginRound();
+    }
+  } else if (state.phase !== "build" || state.bloons.length > 0) {
     autoTimer = 0;
   }
-  if (state.phase === "build" && autoStart) {
-    autoTimer += dt;
-    if (autoTimer > 1.2) beginRound();
-  }
+
   if (selection.tower && !state.towers.includes(selection.tower)) {
     selection.tower = null;
     refreshDock();
   }
+  syncAbilityBar();
+  refreshAbilityBar();
   refreshHud();
   if (state.phase === "won" || state.phase === "lost") endGame();
 }
 
 function render() {
-  if (!state) return;
+  if (!state || overlayUp()) return;
   ctx.save();
   ctx.clearRect(0, 0, view.w, view.h);
 
@@ -474,13 +627,15 @@ function render() {
     const def = TOWER_BY_ID[selection.placing];
     const p = selection.pointer;
     drawRange(ctx, p.x, p.y, Math.min(def.base.range, 900), selection.valid);
-    drawTower(ctx, { defId: def.id, x: p.x, y: p.y, tiers: [0, 0], angle: -Math.PI / 2 }, { ghost: true });
+    drawTower(ctx, { defId: def.id, x: p.x, y: p.y, tiers: [0, 0], level: state.heroLevel, angle: 0 }, { ghost: true });
   }
 
-  drawTowers(ctx, state, selection.tower);
+  drawEffects(ctx, state, time);
+  drawTowers(ctx, state, selection.tower, time);
   drawBloons(ctx, state, time);
   drawProjectiles(ctx, state);
   drawFx(ctx, fx);
+  drawOverlayFx(ctx, fx, WORLD);
   ctx.restore();
 }
 
@@ -567,14 +722,20 @@ function bindUi() {
       selection.placing = null;
       selection.tower = null;
       refreshDock();
+    } else if (e.code.startsWith("Digit")) {
+      // 1-9 fire the abilities in bar order, so a keyboard player never has to
+      // hunt for a 52px circle mid-wave.
+      const idx = Number(e.code.slice(5)) - 1;
+      const row = abilityRows[idx];
+      if (row && activateAbility(state, row.tower)) sfx.ability();
     }
   });
 
   // Pausing on tab-away stops a backgrounded round quietly losing the run.
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && state && state.phase === "wave") {
+    if (document.hidden && state && state.bloons.length > 0) {
       paused = true;
-      $("pause-round").textContent = state.round;
+      $("pause-round").textContent = Math.min(state.round, ROUND_COUNT);
       $("pause-overlay").hidden = false;
     }
   });
@@ -586,5 +747,5 @@ bindUi();
 bindInput();
 state = createGame({ mapId: chosenMap, difficultyId: chosenDiff });
 buildShop();
-resize();
+layout();
 createLoop({ update: step, render }).start();

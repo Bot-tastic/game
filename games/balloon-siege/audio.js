@@ -113,6 +113,12 @@ export const sfx = {
   denied() {
     tone({ freq: 180, freq2: 140, type: "square", dur: 0.12, gain: 0.16 });
   },
+  ability() {
+    if (!ensure()) return;
+    noise({ dur: 0.35, gain: 0.26, filterFreq: 2400 });
+    tone({ freq: 300, freq2: 1200, type: "sawtooth", dur: 0.3, gain: 0.22 });
+    tone({ freq: 900, freq2: 1600, type: "triangle", dur: 0.25, gain: 0.16, delay: 0.06 });
+  },
   roundStart() {
     tone({ freq: 330, freq2: 495, type: "triangle", dur: 0.2, gain: 0.24 });
   },

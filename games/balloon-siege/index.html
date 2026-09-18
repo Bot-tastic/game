@@ -17,16 +17,24 @@
       <header class="topbar safe-area" id="topbar-row">
         <a class="hud-back" href="../../index.html">&larr; Games</a>
         <div class="stats">
+          <div class="stat-chip stat-chip--hero" id="hero-chip" hidden>
+            <span class="k">🐒</span><span class="v" id="hero-level">1</span>
+            <span class="xp"><i id="hero-xp"></i></span>
+          </div>
           <div class="stat-chip stat-chip--lives"><span class="k">♥</span><span class="v" id="lives-value">100</span></div>
-          <div class="stat-chip stat-chip--cash"><span class="k">$</span><span class="v" id="cash-value">650</span></div>
+          <div class="stat-chip stat-chip--cash"><span class="k">$</span><span class="v" id="cash-value">700</span></div>
           <div class="stat-chip"><span class="k">Round</span><span class="v" id="round-value">1/40</span></div>
         </div>
       </header>
+    </div>
 
-      <div class="wave-bar" id="wave-bar" hidden><div class="wave-fill" id="wave-fill"></div></div>
+    <!-- Control dock: abilities, round controls, shop / selection ---------- -->
+    <aside class="dock safe-area" id="dock">
+      <div class="abilities" id="ability-bar"></div>
 
       <div class="round-controls" id="round-controls">
         <div class="preview" id="preview"></div>
+        <div class="wave-bar" id="wave-bar" hidden><div class="wave-fill" id="wave-fill"></div></div>
         <div class="round-buttons">
           <button class="btn btn--primary btn--go" id="start-btn">Start Round</button>
           <button class="chip-btn" id="speed-btn" aria-label="Game speed">1x</button>
@@ -34,10 +42,7 @@
           <button class="chip-btn" id="mute-btn" aria-label="Toggle sound">♪</button>
         </div>
       </div>
-    </div>
 
-    <!-- Shop / selection dock ------------------------------------------- -->
-    <div class="dock safe-area" id="dock">
       <div class="shop" id="shop"></div>
 
       <div class="inspector" id="inspector" hidden>
@@ -49,7 +54,7 @@
           </div>
           <button class="chip-btn" id="target-btn">First</button>
         </div>
-        <div class="upgrades">
+        <div class="upgrades" id="upgrades">
           <button class="upgrade" id="up-0">
             <span class="up-path" id="up-0-path">Sharpshooter</span>
             <span class="up-name" id="up-0-name">Razor Darts</span>
@@ -63,12 +68,17 @@
             <span class="up-cost" id="up-1-cost">$110</span>
           </button>
         </div>
+        <div class="hero-panel" id="hero-panel" hidden>
+          <div class="hp-row"><strong id="hp-level">Level 1</strong><span id="hp-next"></span></div>
+          <div class="hp-bar"><i id="hp-fill"></i></div>
+          <p class="hp-perk" id="hp-perk"></p>
+        </div>
         <div class="insp-actions">
           <button class="chip-btn chip-btn--danger" id="sell-btn">Sell $150</button>
           <button class="chip-btn" id="close-insp">Done</button>
         </div>
       </div>
-    </div>
+    </aside>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -78,7 +88,7 @@
   <section class="overlay overlay--menu" id="menu-overlay">
     <div class="menu-inner">
       <h1 class="logo">BALLOON<span>SIEGE</span></h1>
-      <p class="tagline">Build the gauntlet. Pop everything. 40 rounds.</p>
+      <p class="tagline">Build the gauntlet. Level your hero. Pop everything.</p>
 
       <h2 class="section-label">Map</h2>
       <div class="map-grid" id="map-grid"></div>
@@ -88,6 +98,7 @@
 
       <button class="btn btn--primary btn--wide" id="play-btn">Play</button>
       <p class="best-line" id="best-line"></p>
+      <p class="rotate-note" id="rotate-note" hidden>Turn your phone sideways — the board is built for landscape.</p>
     </div>
   </section>
 
@@ -106,6 +117,7 @@
     <h2 id="end-title">Defeat</h2>
     <p class="stat">Reached round <strong id="end-round">1</strong></p>
     <p class="stat">Bloons popped <strong id="end-pops">0</strong></p>
+    <p class="stat">Hero level <strong id="end-hero">1</strong></p>
     <p class="stat" id="end-best"></p>
     <div class="actions">
       <button class="btn btn--primary" id="retry-btn">Play again</button>
