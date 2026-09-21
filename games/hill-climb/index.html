@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0b0d12" />
+  <title>Hill Climb</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="game-page">
+  <canvas id="game"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="hud safe-area" id="hud" hidden>
+    <a class="hud-back" href="../../index.html">&larr; Games</a>
+    <div class="hud-scores">
+      <div class="hud-score">
+        <span class="label">Distance</span>
+        <span class="value" id="dist-value">0<small>m</small></span>
+      </div>
+      <div class="hud-score">
+        <span class="label">Best</span>
+        <span class="value" id="best-value">0<small>m</small></span>
+      </div>
+      <div class="hud-score hud-score--coin">
+        <span class="label">Coins</span>
+        <span class="value" id="coin-value">0</span>
+      </div>
+    </div>
+  </header>
+
+  <button class="icon-btn" id="mute-btn" aria-label="Toggle sound">&#9834;</button>
+  <button class="icon-btn icon-btn--pause" id="pause-btn" aria-label="Pause" hidden>&#10073;&#10073;</button>
+
+  <div class="gauges safe-area" id="gauges" hidden>
+    <div class="gauge gauge--fuel">
+      <span class="gauge-label">Fuel</span>
+      <div class="gauge-track"><i id="fuel-fill"></i></div>
+    </div>
+    <div class="speedo"><span id="speed-value">0</span><small>km/h</small></div>
+  </div>
+
+  <div class="air-banner" id="air-banner" aria-hidden="true">
+    <span class="air-time" id="air-time">0.0s</span>
+    <span class="air-label" id="air-label">AIRTIME</span>
+  </div>
+
+  <div class="controls safe-area" id="controls" hidden>
+    <button class="pad pad--brake" id="brake-btn" aria-label="Brake and reverse">BRAKE</button>
+    <button class="pad pad--gas" id="gas-btn" aria-label="Gas">GAS</button>
+  </div>
+
+  <!-- ---- Menu: stage select ------------------------------------------- -->
+  <section class="overlay overlay--menu" id="menu-overlay">
+    <div class="panel panel--wide">
+      <p class="eyebrow">Two wheels, one bad idea</p>
+      <h1 class="title">Hill<span>Climb</span></h1>
+      <p class="tagline">Gas up the hills, keep it on its wheels, and don't run the tank dry.</p>
+
+      <div class="wallet"><span class="coin">🪙</span><b id="wallet-value">0</b><span class="wallet-label">coins</span></div>
+
+      <div class="stage-grid" id="stage-grid"></div>
+
+      <ul class="controls-list">
+        <li><b>Gas</b><span>Right pad &middot; &#8594; / D &middot; Space</span></li>
+        <li><b>Brake</b><span>Left pad &middot; &#8592; / A &mdash; also reverses</span></li>
+        <li><b>In the air</b><span>Gas leans back, brake leans forward</span></li>
+      </ul>
+
+      <div class="actions">
+        <button class="btn btn--ghost" id="garage-btn">🔧 Garage</button>
+        <button class="btn btn--primary" id="start-btn">Start Engine</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Garage: upgrades ---------------------------------------------- -->
+  <section class="overlay overlay--garage" id="garage-overlay" hidden>
+    <div class="panel panel--wide">
+      <p class="eyebrow">Garage</p>
+      <h2 class="title">Upgrades</h2>
+      <div class="wallet"><span class="coin">🪙</span><b id="garage-wallet">0</b><span class="wallet-label">coins</span></div>
+      <div class="parts" id="parts"></div>
+      <div class="actions">
+        <button class="btn btn--ghost" id="garage-back">Back</button>
+        <button class="btn btn--primary" id="garage-drive">Drive</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Pause ---------------------------------------------------------- -->
+  <section class="overlay overlay--pause" id="pause-overlay" hidden>
+    <div class="panel">
+      <p class="eyebrow">Paused</p>
+      <h2 class="title" id="pause-stage">Countryside</h2>
+      <div class="result-grid">
+        <div><b id="pause-dist">0m</b><span>Distance</span></div>
+        <div><b id="pause-coins">0</b><span>Coins this run</span></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn--primary" id="resume-btn">Resume</button>
+        <button class="btn btn--ghost" id="quit-btn">Quit run</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Run over -------------------------------------------------------- -->
+  <section class="overlay overlay--over" id="over-overlay" hidden>
+    <div class="panel">
+      <p class="eyebrow eyebrow--warn" id="over-reason">Broken neck</p>
+      <h2 class="title title--over">Run over</h2>
+      <div class="score-hero"><span id="final-dist">0</span><small>m</small></div>
+      <div class="result-grid">
+        <div><b id="final-coins">0</b><span>Coins</span></div>
+        <div><b id="final-air">0.0s</b><span>Best airtime</span></div>
+        <div><b id="final-flips">0</b><span>Flips</span></div>
+        <div><b id="final-best">0m</b><span>Stage best</span></div>
+      </div>
+      <p class="verdict" id="verdict"></p>
+      <div class="actions">
+        <button class="btn btn--primary" id="retry-btn">Run It Back</button>
+        <button class="btn btn--ghost" id="over-garage">🔧 Garage</button>
+        <button class="btn btn--ghost" id="over-stages">Stages</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
