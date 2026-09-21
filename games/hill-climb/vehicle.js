@@ -157,11 +157,17 @@ export function stepVehicle(car, terrain, stage, input, dt) {
     car.vy -= gravity * h;
     const sp = Math.hypot(car.vx, car.vy);
     if (sp > 0.01) {
-      const d = stage.drag * sp;
-      car.vx -= (car.vx / sp) * d * sp * h;
-      car.vy -= (car.vy / sp) * d * sp * h;
+      // Quadratic: stage.drag is the deceleration in m/s^2 at 1 m/s, so the
+      // whole term is drag * v^2. Keep it small — this force acts in the air
+      // too, and a heavy one turns every jump into a belly flop.
+      const dec = stage.drag * sp * h;
+      car.vx -= car.vx * dec;
+      car.vy -= car.vy * dec;
     }
-    car.av *= 1 - 0.55 * h;
+    // Barely any angular damping: the chassis is supposed to keep rotating
+    // once a kicker has thrown it, which is what makes flips (and landing on
+    // your head) possible.
+    car.av *= 1 - 0.12 * h;
 
     const cosA = Math.cos(car.angle);
     const sinA = Math.sin(car.angle);
@@ -189,7 +195,7 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       const relV = -((w.vx - avx) * upx + (w.vy - avy) * upy);
       const comp = travel - along;
       const k = 26000 / tune.suspension;
-      const c = 1500 * Math.sqrt(tune.suspension);
+      const c = 1150 * Math.sqrt(tune.suspension);
       let force = k * comp - c * relV;
       force = clamp(force, -9000, 26000);
       w.comp = clamp(comp / travel, -0.6, 1);
@@ -241,7 +247,7 @@ export function stepVehicle(car, terrain, stage, input, dt) {
         w.y += hit.ny * hit.depth;
         const vn = w.vx * hit.nx + w.vy * hit.ny;
         if (vn < 0) {
-          const j = -(1 + 0.08) * vn;
+          const j = -(1 + 0.12) * vn;
           w.vx += hit.nx * j;
           w.vy += hit.ny * j;
         }
@@ -268,10 +274,10 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       const share = i === 0 ? 1 - tune.awd * 0.5 : tune.awd;
       let torque = 0;
       if (input.throttle !== 0 && share > 0) {
-        const power = 2100 * tune.engine * share;
+        const power = 2400 * tune.engine * share;
         // Torque falls off as the wheel spins up: a crude but effective
         // stand-in for a power curve, and it caps top speed.
-        const fade = 1 / (1 + Math.abs(w.spin) / 46);
+        const fade = 1 / (1 + Math.abs(w.spin) / 38);
         torque = input.throttle * power * fade;
       }
       if (input.brake) torque -= clamp(w.spin, -1, 1) * 2600;
@@ -280,18 +286,20 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       w.spin = clamp(w.spin, -180, 180);
       w.rot += w.spin * h;
 
-      // Engine torque reacts into the chassis: gas lifts the nose.
+      // Engine torque reacts into the chassis: gas lifts the nose, and on a
+      // steep climb it will happily loop the car over backwards. Scaled with
+      // gravity, or a low-gravity stage would backflip off its own start line.
       if (w.onGround && torque !== 0) {
-        car.av += (-torque * 0.00016 * h) / 1;
+        car.av += -torque * 0.00035 * clamp(gravity / 15, 0.22, 1) * h;
       }
     }
 
     // Air control: the throttle axis pitches the car.
     if (!anyGround) {
-      car.av += input.throttle * 3.1 * h;
-      if (input.brake) car.av -= 2.4 * h;
+      car.av += input.throttle * 6.2 * h;
+      if (input.brake) car.av -= 4.4 * h;
     }
-    car.av = clamp(car.av, -9, 9);
+    car.av = clamp(car.av, -13, 13);
 
     car.x += car.vx * h;
     car.y += car.vy * h;

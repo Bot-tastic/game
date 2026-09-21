@@ -532,13 +532,16 @@ function update(dt) {
     if (crashTimer <= 0) endRun("neck");
   }
 
-  // Camera: lead the car, pull back with speed, and settle softly.
+  // Camera: lead the car, pull back with speed and with height so a big jump
+  // still shows the landing, and settle softly.
+  const height = Math.max(0, car.y - terrain.groundY(car.x) - 1);
   const lead = Math.min(4.5, car.vx * 0.42);
   const targetX = car.x + lead;
-  const targetY = car.y + 0.9;
+  const targetY = car.y + 0.9 - Math.min(2.5, height * 0.35);
   camX += (targetX - camX) * Math.min(1, dt * 6);
-  camY += (targetY - camY) * Math.min(1, dt * 4);
-  renderer.setZoom(1 - Math.min(0.26, Math.max(0, car.speed - 8) * 0.016));
+  camY += (targetY - camY) * Math.min(1, dt * (car.grounded ? 4 : 2.6));
+  const pull = Math.max(0, car.speed - 8) * 0.016 + height * 0.035;
+  renderer.setZoom(1 - Math.min(0.42, pull));
 }
 
 // ---------------------------------------------------------------------------

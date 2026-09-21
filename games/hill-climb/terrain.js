@@ -11,7 +11,7 @@
 
 export const STEP = 1.2; // metres between ground samples
 const CHUNK = 64; // samples per chunk
-const FLAT_END = 26; // metres of flat tarmac at the start line
+const FLAT_END = 70; // metres easing out of the flat start line
 const KEEP_BEHIND = 3; // chunks retained behind the car
 
 export function mulberry32(seed) {
@@ -44,28 +44,54 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
   ];
   // A slow drift that keeps long stretches from averaging out to a plateau.
   const drift = { wave: p.wave * 4.3, amp: p.amp * 1.25, phase: rnd() * 6.283 };
-  // Occasional launch ramps: a raised cosine bump every so many metres.
-  const rampRnd = mulberry32(seed ^ 0x9e3779b9);
-  const ramps = [];
-  for (let x = 120; x < 40000; x += 90 + rampRnd() * 150) {
-    if (rampRnd() < p.ramp) ramps.push({ x, w: 9 + rampRnd() * 7, h: 1.6 + rampRnd() * 2.4 });
-  }
-
-  /** Raw height (metres, y-up) at any x — the single source of truth. */
-  function heightAt(x) {
+  /** The hills alone, before any kicker is stamped on top. */
+  function baseAt(x) {
     if (x <= 0) return 0;
     let h = 0;
     for (const o of octaves) h += Math.sin(x / o.wave + o.phase) * o.amp;
     h += Math.sin(x / drift.wave + drift.phase) * drift.amp;
     // Difficulty ramps with distance: amplitude grows, capped so it stays
     // driveable rather than turning into a wall.
-    h *= 1 + Math.min(x / 2600, 1.1);
-    for (const r of ramps) {
-      const d = Math.abs(x - r.x);
-      if (d < r.w) h += r.h * 0.5 * (1 + Math.cos((d / r.w) * Math.PI));
-    }
+    return h * (1 + Math.min(x / 2000, 1.2));
+  }
+
+  // Launch kickers. These are what put the car in the air, so they are
+  // asymmetric on purpose: a short, steep run-up to the lip and almost nothing
+  // on the far side, so you leave the ground instead of being set back down.
+  // A kicker is only stamped where the hill underneath is not already climbing
+  // hard — stacking one on a steep face is what makes a car simply stop.
+  const rampRnd = mulberry32(seed ^ 0x9e3779b9);
+  const ramps = [];
+  for (let x = 70; x < 40000; x += 80 + rampRnd() * 120) {
+    if (rampRnd() >= p.ramp) continue;
+    const up = 4.5 + rampRnd() * 3.5;
+    let h = 2.1 + rampRnd() * 2.3;
+    // Ease the first couple of hundred metres in: the opening stretch should
+    // teach the throttle, not launch a stock car into a hillside.
+    h *= 0.45 + 0.55 * Math.min(1, x / 260);
+    // Flatten the kicker into whatever the hill is already doing.
+    const under = (baseAt(x) - baseAt(x - up)) / up;
+    if (under > 0.75) continue;
+    if (under > 0.2) h *= 1 - (under - 0.2) / 0.55;
+    if (h < 0.6) continue;
+    ramps.push({ x, up, down: 1.6 + rampRnd() * 2.2, h });
+  }
+
+  /** Height a kicker adds at x: smoothstep up to the lip, quick fall after. */
+  function rampAt(r, x) {
+    const d = x - r.x;
+    if (d <= -r.up || d >= r.down) return 0;
+    if (d <= 0) return r.h * smoothstep(1 + d / r.up);
+    return r.h * (1 - smoothstep(d / r.down));
+  }
+
+  /** Raw height (metres, y-up) at any x — the single source of truth. */
+  function heightAt(x) {
+    if (x <= 0) return 0;
+    let h = baseAt(x);
+    for (const r of ramps) h += rampAt(r, x);
     // Ease out of the flat start line instead of stepping off a cliff.
-    if (x < FLAT_END) h *= smoothstep(Math.max(0, x - 6) / (FLAT_END - 6));
+    if (x < FLAT_END) h *= smoothstep(Math.max(0, x - 8) / (FLAT_END - 8));
     return h;
   }
 
