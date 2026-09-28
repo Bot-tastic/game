@@ -17,7 +17,7 @@ function push(fx, p) {
 
 /** Dirt/snow/dust thrown by a spinning wheel. */
 export function dirt(fx, x, y, dirX, amount, color) {
-  const n = Math.min(4, Math.ceil(amount * (reduceMotion ? 1 : 3)));
+  const n = Math.min(3, Math.ceil(amount * (reduceMotion ? 1 : 2)));
   for (let i = 0; i < n; i++) {
     push(fx, {
       kind: "dirt",
@@ -27,7 +27,7 @@ export function dirt(fx, x, y, dirX, amount, color) {
       vy: 2 + Math.random() * 5,
       life: 0.45 + Math.random() * 0.35,
       t: 0,
-      size: 0.05 + Math.random() * 0.07,
+      size: 0.035 + Math.random() * 0.06,
       color,
       gravity: 12,
     });

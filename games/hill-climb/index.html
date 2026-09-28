@@ -21,7 +21,7 @@
         <span class="value" id="dist-value">0<small>m</small></span>
       </div>
       <div class="hud-score">
-        <span class="label">Best</span>
+        <span class="label" id="best-label">Best</span>
         <span class="value" id="best-value">0<small>m</small></span>
       </div>
       <div class="hud-score hud-score--coin">
@@ -30,6 +30,11 @@
       </div>
     </div>
   </header>
+
+  <div class="progress safe-area" id="progress" hidden>
+    <div class="progress-track"><i id="progress-fill"></i><b id="progress-car"></b></div>
+    <span class="progress-flag" aria-hidden="true">🏁</span>
+  </div>
 
   <button class="icon-btn" id="mute-btn" aria-label="Toggle sound">&#9834;</button>
   <button class="icon-btn icon-btn--pause" id="pause-btn" aria-label="Pause" hidden>&#10073;&#10073;</button>
@@ -57,11 +62,23 @@
     <div class="panel panel--wide">
       <p class="eyebrow">Two wheels, one bad idea</p>
       <h1 class="title">Hill<span>Climb</span></h1>
-      <p class="tagline">Gas up the hills, keep it on its wheels, and don't run the tank dry.</p>
+      <p class="tagline">48 levels across eight worlds. Gas up the hills, clear the pits, keep it on its wheels.</p>
 
       <div class="wallet"><span class="coin">🪙</span><b id="wallet-value">0</b><span class="wallet-label">coins</span></div>
 
-      <div class="stage-grid" id="stage-grid"></div>
+      <div class="mode-tabs" role="tablist">
+        <button class="mode-tab" data-mode="levels" role="tab">Levels <small id="star-total">0★</small></button>
+        <button class="mode-tab" data-mode="endless" role="tab">Endless</button>
+      </div>
+
+      <div class="levels-view" id="levels-view">
+        <div class="world-tabs" id="world-tabs"></div>
+        <div class="level-grid" id="level-grid"></div>
+      </div>
+
+      <div class="endless-view" id="endless-view" hidden>
+        <div class="stage-grid" id="stage-grid"></div>
+      </div>
 
       <ul class="controls-list">
         <li><b>Gas</b><span>Right pad &middot; &#8594; / D &middot; Space</span></li>
@@ -106,23 +123,26 @@
     </div>
   </section>
 
-  <!-- ---- Run over -------------------------------------------------------- -->
+  <!-- ---- Run over / level finished ------------------------------------ -->
   <section class="overlay overlay--over" id="over-overlay" hidden>
     <div class="panel">
       <p class="eyebrow eyebrow--warn" id="over-reason">Broken neck</p>
-      <h2 class="title title--over">Run over</h2>
-      <div class="score-hero"><span id="final-dist">0</span><small>m</small></div>
+      <h2 class="title title--over" id="over-title">Run over</h2>
+      <div class="stars-row" id="final-stars" hidden></div>
+      <div class="score-hero" id="score-hero"><span id="final-dist">0</span><small id="final-unit">m</small></div>
       <div class="result-grid">
         <div><b id="final-coins">0</b><span>Coins</span></div>
         <div><b id="final-air">0.0s</b><span>Best airtime</span></div>
         <div><b id="final-flips">0</b><span>Flips</span></div>
-        <div><b id="final-best">0m</b><span>Stage best</span></div>
+        <div><b id="final-best">0m</b><span id="final-best-label">Stage best</span></div>
       </div>
+      <ul class="star-goals" id="star-goals" hidden></ul>
       <p class="verdict" id="verdict"></p>
       <div class="actions">
+        <button class="btn btn--primary" id="next-btn" hidden>Next Level</button>
         <button class="btn btn--primary" id="retry-btn">Run It Back</button>
         <button class="btn btn--ghost" id="over-garage">🔧 Garage</button>
-        <button class="btn btn--ghost" id="over-stages">Stages</button>
+        <button class="btn btn--ghost" id="over-stages">Menu</button>
       </div>
     </div>
   </section>

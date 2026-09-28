@@ -330,3 +330,17 @@ export function stepVehicle(car, terrain, stage, input, dt) {
 }
 
 export { pointOf, anchorOf, groundContact, REST };
+
+/**
+ * Did the car touch a pit's hazard? True once a wheel or the chassis dips
+ * below the hazard surface anywhere over the gap.
+ */
+export function hazardHit(car, terrain) {
+  for (const w of car.wheels) {
+    const q = terrain.hazardAt(w.x);
+    if (q && w.y - WHEEL.r * 0.6 < q.surface) return q;
+  }
+  const q = terrain.hazardAt(car.x);
+  if (q && car.y < q.surface + 0.2) return q;
+  return null;
+}
