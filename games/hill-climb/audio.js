@@ -167,6 +167,16 @@ export function createAudio() {
       tone(190, { type: "sawtooth", dur: 0.2, gain: 0.16, slide: -110, delay: 0.24 });
     },
     warn: () => tone(740, { type: "square", dur: 0.1, gain: 0.16 }),
+    finish: () => {
+      // A little fanfare: rising arpeggio, then a held chord.
+      [523, 659, 784].forEach((f, i) => tone(f, { type: "triangle", dur: 0.14, gain: 0.2, delay: i * 0.09 }));
+      tone(1047, { type: "triangle", dur: 0.5, gain: 0.2, delay: 0.27 });
+      tone(784, { type: "sine", dur: 0.5, gain: 0.14, delay: 0.27 });
+    },
+    star: () => {
+      tone(1320, { type: "triangle", dur: 0.12, gain: 0.2 });
+      tone(1980, { type: "sine", dur: 0.2, gain: 0.14, delay: 0.05 });
+    },
   };
 
   return {

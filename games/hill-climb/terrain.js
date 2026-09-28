@@ -28,9 +28,11 @@ const smoothstep = (t) => t * t * (3 - 2 * t);
 
 /**
  * Create a terrain for a stage. `seed` makes a run reproducible; omit it for
- * a fresh landscape every attempt.
+ * a fresh landscape every attempt. Pass a campaign `level` (levels.js) for a
+ * finite course: its features are stamped on, and the ground runs flat past
+ * the finish line.
  */
-export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
+export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = null) {
   const p = stage.terrain;
   const rnd = mulberry32(seed);
 
@@ -44,16 +46,149 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
   ];
   // A slow drift that keeps long stretches from averaging out to a plateau.
   const drift = { wave: p.wave * 4.3, amp: p.amp * 1.25, phase: rnd() * 6.283 };
-  /** The hills alone, before any kicker is stamped on top. */
-  function baseAt(x) {
+  const finishX = level ? level.length : Infinity;
+
+  /** The hills alone, before any feature or kicker is stamped on top. */
+  function hillsAt(x) {
     if (x <= 0) return 0;
     let h = 0;
     for (const o of octaves) h += Math.sin(x / o.wave + o.phase) * o.amp;
     h += Math.sin(x / drift.wave + drift.phase) * drift.amp;
     // Difficulty ramps with distance: amplitude grows, capped so it stays
-    // driveable rather than turning into a wall.
+    // driveable rather than turning into a wall. A level has its own scale.
+    if (level) return h * level.ampScale * (1 + 0.3 * Math.min(1, x / level.length));
     return h * (1 + Math.min(x / 2000, 1.2));
   }
+
+  // --- level features ---------------------------------------------------
+  const feats = level ? level.features : [];
+  const additive = feats.filter((f) => f.type !== "pit");
+
+  /** Hills plus the additive features (hills, washboards, ledges). */
+  function shapedAt(x) {
+    let h = hillsAt(x);
+    for (const f of additive) {
+      if (f.type === "hill") {
+        const d = (x - f.x) / f.w;
+        if (d > -0.5 && d < 0.5) h += f.h * (1 + Math.cos(d * 2 * Math.PI)) * 0.5;
+      } else if (f.type === "bumps") {
+        const d = x - (f.x - f.len / 2);
+        if (d > 0 && d < f.len) h += Math.sin((d / f.len) * Math.PI) * f.a * (1 - Math.cos(d * 1.9));
+      } else if (f.type === "drop" && x < f.x && x > f.x - 14) {
+        // A short flat lip before the ledge (the fall itself is in dropAt).
+        h += (hillsAt(f.x) - hillsAt(x)) * smoothstep((x - (f.x - 14)) / 14);
+      }
+    }
+    return h;
+  }
+
+  /** How far the ledges passed so far have lowered the ground at x. */
+  function dropAt(x) {
+    let h = 0;
+    for (const f of additive) {
+      if (f.type === "drop" && x > f.x) h -= f.d * smoothstep(Math.min(1, (x - f.x) / 3));
+    }
+    return h;
+  }
+
+  // A level's base ground is precomputed and slope-limited: no sustained
+  // climb may be steeper than the world's grip can drive up (kickers, added
+  // later, are short enough to carry momentum over), and no descent so steep
+  // that the valley at its foot folds the car in half. Ledges are added after.
+  const maxUp = level ? (0.12 + 0.3 * stage.grip) * (0.92 + 0.16 * (level.index / 5)) : Infinity;
+  const maxDown = 0.72;
+  let baseAt = shapedAt;
+  if (level) {
+    const n = Math.ceil((finishX + 260) / STEP);
+    const base = new Float64Array(n + 1);
+    base[0] = shapedAt(0);
+    for (let i = 1; i <= n; i++) base[i] = Math.min(shapedAt(i * STEP), base[i - 1] + maxUp * STEP);
+    for (let i = n - 1; i >= 0; i--) base[i] = Math.min(base[i], base[i + 1] + maxDown * STEP);
+    for (let i = 0; i <= n; i++) base[i] += dropAt(i * STEP);
+    baseAt = (x) => {
+      const s = Math.max(0, Math.min(n - 1e-9, x / STEP));
+      const i = Math.floor(s);
+      return base[i] + (base[Math.min(n, i + 1)] - base[i]) * (s - i);
+    };
+  }
+
+  // Pits flatten a stretch of road into approach, kicker, gap and landing.
+  // The spot is searched inside the feature's slot for the flattest fit, so
+  // the plateau never has to bridge a big height difference.
+  const APPROACH = 34;
+  const LANDING = 24;
+  const BLEND = 16;
+  const pits = [];
+  for (const f of feats) {
+    if (f.type !== "pit") continue;
+    let best = null;
+    const span = 12;
+    for (let k = 0; k <= 16; k++) {
+      const x0 = f.x - span / 2 + (span * k) / 16;
+      const ya = baseAt(x0 - APPROACH);
+      const yb = baseAt(x0 + f.w + LANDING);
+      const score = Math.abs(yb - ya) + Math.abs(baseAt(x0 - APPROACH - BLEND) - ya) * 0.5;
+      if (!best || score < best.score) best = { x0, ya, yb, score };
+    }
+    const { x0, ya } = best;
+    // Landing plateau may sit a little lower than the lip, never higher.
+    const yb = Math.max(ya - 2.5, Math.min(ya, best.yb));
+    const x1 = x0 + f.w;
+    const a = x0 - APPROACH;
+    const b = x1 + LANDING;
+    // Blend lengths grow with the height the plateau has to meet, so the
+    // ramp onto and off it is never steeper than the world allows.
+    const blendLen = (edge, y, dir) => {
+      let d = BLEND;
+      while (d < 70 && Math.abs(y - baseAt(edge + dir * d)) > d * maxUp * 0.6) d += 2;
+      return d;
+    };
+    pits.push({
+      x0,
+      x1,
+      a,
+      b,
+      ba: blendLen(a, ya, -1),
+      bb: blendLen(b, yb, 1),
+      ya,
+      yb,
+      kh: f.kh,
+      up: 7,
+      depth: 3.4,
+      surface: Math.min(ya, yb) - 1.3,
+      kind: stage.theme.hazard.kind,
+    });
+  }
+
+  /** Height inside a pit's flattened stretch, or null outside it. */
+  function pitAt(pit, x, under) {
+    if (x < pit.a - pit.ba || x > pit.b + pit.bb) return null;
+    if (x < pit.a) return under + (pit.ya - under) * smoothstep((x - (pit.a - pit.ba)) / pit.ba);
+    if (x > pit.b) return pit.yb + (under - pit.yb) * smoothstep((x - pit.b) / pit.bb);
+    if (x <= pit.x0) {
+      const t = Math.max(0, (x - (pit.x0 - pit.up)) / pit.up);
+      return pit.ya + pit.kh * Math.pow(t, 1.6);
+    }
+    if (x < pit.x1) {
+      // The basin: steep walls, flat floor well under the hazard surface.
+      const floor = Math.min(pit.ya, pit.yb) - pit.depth;
+      const e = Math.min(x - pit.x0, pit.x1 - x);
+      const wall = Math.min(1, e / 0.9);
+      const top = x - pit.x0 < pit.x1 - x ? pit.ya : pit.yb;
+      return top + (floor - top) * wall;
+    }
+    return pit.yb;
+  }
+
+  /** The stretches kickers must stay out of. */
+  const busy = [
+    ...pits.map((q) => [q.a - q.ba, q.b + q.bb]),
+    ...additive.map((f) => {
+      const r = f.type === "hill" ? f.w / 2 : f.type === "bumps" ? f.len / 2 : 16;
+      return [f.x - r - 6, f.x + r + 6];
+    }),
+  ];
+  const isBusy = (x) => busy.some(([a, b]) => x > a && x < b);
 
   // Launch kickers. These are what put the car in the air, so they are
   // asymmetric on purpose: a short, steep run-up to the lip and almost nothing
@@ -61,11 +196,13 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
   // A kicker is only stamped where the hill underneath is not already climbing
   // hard — stacking one on a steep face is what makes a car simply stop.
   const rampRnd = mulberry32(seed ^ 0x9e3779b9);
+  const rampChance = p.ramp * (level ? level.rampScale : 1);
   const ramps = [];
-  for (let x = 70; x < 40000; x += 80 + rampRnd() * 120) {
-    if (rampRnd() >= p.ramp) continue;
+  for (let x = 70; x < Math.min(40000, finishX - 30); x += 80 + rampRnd() * 120) {
+    if (rampRnd() >= rampChance) continue;
     const up = 4.5 + rampRnd() * 3.5;
     let h = 2.1 + rampRnd() * 2.3;
+    if (isBusy(x)) continue;
     // Ease the first couple of hundred metres in: the opening stretch should
     // teach the throttle, not launch a stock car into a hillside.
     h *= 0.45 + 0.55 * Math.min(1, x / 260);
@@ -74,6 +211,13 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
     if (under > 0.75) continue;
     if (under > 0.2) h *= 1 - (under - 0.2) / 0.55;
     if (h < 0.6) continue;
+    // On a level a kicker must be takeable from a standing start after a
+    // retry, so it is lower and never steeper than about 45 degrees.
+    if (level) {
+      h *= 0.62 + 0.25 * (level.index / 5);
+      ramps.push({ x, up: Math.max(up, h * 1.7), down: 1.6 + rampRnd() * 2.2, h });
+      continue;
+    }
     ramps.push({ x, up, down: 1.6 + rampRnd() * 2.2, h });
   }
 
@@ -85,14 +229,38 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
     return r.h * (1 - smoothstep(d / r.down));
   }
 
+  function courseAt(x) {
+    let h = baseAt(x);
+    for (const r of ramps) h += rampAt(r, x);
+    for (const q of pits) {
+      const v = pitAt(q, x, h);
+      if (v != null) return v;
+    }
+    return h;
+  }
+
+  const finishY = level ? courseAt(finishX) : 0;
+
   /** Raw height (metres, y-up) at any x — the single source of truth. */
   function heightAt(x) {
     if (x <= 0) return 0;
-    let h = baseAt(x);
-    for (const r of ramps) h += rampAt(r, x);
+    let h;
+    if (x > finishX) {
+      // Past the finish the road eases flat, so a car can roll to a stop.
+      const t = smoothstep(Math.min(1, (x - finishX) / 14));
+      h = x - finishX > 14 ? finishY : courseAt(x) + (finishY - courseAt(x)) * t;
+    } else {
+      h = courseAt(x);
+    }
     // Ease out of the flat start line instead of stepping off a cliff.
     if (x < FLAT_END) h *= smoothstep(Math.max(0, x - 8) / (FLAT_END - 8));
     return h;
+  }
+
+  /** The hazard under x, if x is over a pit's gap. */
+  function hazardAt(x) {
+    for (const q of pits) if (x > q.x0 && x < q.x1) return q;
+    return null;
   }
 
   const chunks = new Map(); // index -> Float64Array of heights
@@ -131,6 +299,10 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
   return {
     stage,
     seed,
+    level,
+    finishX,
+    pits,
+    hazardAt,
     STEP,
     heightAt,
     groundY,
@@ -155,43 +327,77 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0) {
 /**
  * Pickups: coins follow the ground in little arcs over crests, fuel cans are
  * spaced so a full tank just about reaches the next one when driven well.
+ * On a level they stop at the finish line, stay out of the pits, and every
+ * pit gets a coin arc over its gap as a reward for clearing it cleanly.
  */
 export function createPickups(terrain, seed) {
   const rnd = mulberry32((seed ^ 0x51ed270b) >>> 0);
+  const level = terrain.level;
   const items = [];
+  const limit = level ? terrain.finishX - 8 : Infinity;
+  const fuelGap = level ? level.fuelGap : 150;
   let nextCoinX = 40;
-  let nextFuelX = 210;
+  let nextFuelX = level ? Math.min(210, fuelGap) : 210;
   let built = 0;
+  let total = 0;
+
+  const nearPit = (x, pad) => terrain.pits.some((q) => x > q.x0 - q.up - pad && x < q.x1 + pad);
+
+  function coin(x, y) {
+    items.push({ kind: "coin", x, y, taken: false, bob: rnd() * 6.28 });
+    total++;
+  }
 
   function buildTo(x) {
+    x = Math.min(x, limit);
     while (nextCoinX < x) {
       const n = 3 + Math.floor(rnd() * 5);
       const gap = 1.5;
       const arc = rnd() < 0.45;
       const bx = nextCoinX;
-      for (let i = 0; i < n; i++) {
-        const cx = bx + i * gap;
-        const lift = arc ? 1.05 + Math.sin((i / (n - 1 || 1)) * Math.PI) * 1.7 : 1.05;
-        items.push({ kind: "coin", x: cx, y: terrain.groundY(cx) + lift, taken: false, bob: rnd() * 6.28 });
+      if (!nearPit(bx, 4) && !nearPit(bx + n * gap, 4) && bx + n * gap < limit) {
+        for (let i = 0; i < n; i++) {
+          const cx = bx + i * gap;
+          const lift = arc ? 1.05 + Math.sin((i / (n - 1 || 1)) * Math.PI) * 1.7 : 1.05;
+          coin(cx, terrain.groundY(cx) + lift);
+        }
       }
       nextCoinX = bx + n * gap + 22 + rnd() * 46;
     }
     while (nextFuelX < x) {
-      items.push({ kind: "fuel", x: nextFuelX, y: terrain.groundY(nextFuelX) + 1.25, taken: false, bob: rnd() * 6.28 });
-      nextFuelX += 150 + rnd() * 110;
+      let fx = nextFuelX;
+      // Slide a can that lands in a pit's stretch to the landing side.
+      for (const q of terrain.pits) if (fx > q.x0 - q.up - 3 && fx < q.x1 + 3) fx = q.x1 + 8;
+      if (fx < limit) items.push({ kind: "fuel", x: fx, y: terrain.groundY(fx) + 1.25, taken: false, bob: rnd() * 6.28 });
+      nextFuelX = fx + (level ? fuelGap * (0.9 + rnd() * 0.2) : 150 + rnd() * 110);
     }
     built = x;
   }
 
-  buildTo(400);
+  // Coin arcs over every pit, following a rough jump trajectory.
+  for (const q of terrain.pits) {
+    const n = Math.max(3, Math.round((q.x1 - q.x0) / 1.4));
+    for (let i = 0; i <= n; i++) {
+      const f = i / n;
+      coin(q.x0 + (q.x1 - q.x0) * f, q.ya + q.kh + 1.1 + Math.sin(f * Math.PI) * 1.3);
+    }
+  }
+
+  buildTo(level ? limit : 400);
+  items.sort((a, b) => a.x - b.x);
 
   return {
     items,
+    /** Coins on the whole course — only meaningful on a level. */
+    get total() {
+      return total;
+    },
     ensure(x) {
-      if (x + 260 > built) buildTo(x + 300);
+      if (!level && x + 260 > built) buildTo(x + 300);
     },
     /** Forget pickups far behind so the array cannot grow without bound. */
     prune(x) {
+      if (level) return;
       let cut = 0;
       while (cut < items.length && items[cut].x < x - 60) cut++;
       if (cut > 64) items.splice(0, cut);
