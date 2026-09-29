@@ -1,0 +1,70 @@
+name: Deploy to own server
+
+# Copies the site to the server and restarts the API with pm2.
+# Does nothing until the repository variable DEPLOY_ENABLED is "true" and the
+# SSH secrets exist — see docs/SERVER.md for the one-time setup.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload site
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          rsync -az --delete \
+            --exclude '.git/' --exclude '.github/' --exclude 'server/node_modules/' \
+            -e "ssh -i ~/.ssh/deploy_key -p $PORT" \
+            ./ "$TARGET:/var/www/game-hub/"
+
+      - name: Install and restart API
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "$TARGET" 'bash -lc "
+            set -e
+            cd /var/www/game-hub/server
+            npm ci --omit=dev
+            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+          "'

@@ -102,6 +102,11 @@
     </div>
   </section>
 
-  <script type="module" src="./main.js"></script>
+  <script type="module">
+    // Pull the newest cloud save (if signed in) before the game reads its storage.
+    import { cloudBoot } from "../../shared/cloud.js";
+    await cloudBoot("geo-dash");
+    await import("./main.js");
+  </script>
 </body>
 </html>
