@@ -8,6 +8,20 @@
   --hc-ink: rgba(9, 11, 17, 0.72);
 }
 
+/* No text selection, magnifier or callout menu anywhere in the game (iOS
+   starts one on quick repeated taps and the page stalls while it does). */
+body.game-page {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.code-input {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 #game {
   position: fixed;
   inset: 0;
@@ -237,6 +251,9 @@
 
 .pad {
   pointer-events: auto;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   width: 104px;
   height: 72px;
   border-radius: 18px;

@@ -600,6 +600,9 @@ function bindPad(btn, key) {
     audio.unlock();
     input[key] = true;
     btn.classList.add("on");
+    // Keep the finger's events on this pad even if it slides off a little.
+    if (btn.setPointerCapture) btn.setPointerCapture(e.pointerId);
+    clearSelection();
   };
   const up = (e) => {
     e.preventDefault();
@@ -614,6 +617,26 @@ function bindPad(btn, key) {
 
 bindPad(el("gas-btn"), "gas");
 bindPad(el("brake-btn"), "brake");
+
+// iOS and iPadOS treat quick repeated taps as a double-tap or long press:
+// they select the pad's label, show the magnifier and the callout menu, and
+// the page stalls for a moment. Cancelling the touch events themselves (not
+// just the pointer events) is what stops Safari from starting that gesture.
+function clearSelection() {
+  const sel = window.getSelection && window.getSelection();
+  if (sel && sel.rangeCount) sel.removeAllRanges();
+}
+const cancel = (e) => e.cancelable && e.preventDefault();
+for (const target of [el("controls"), canvas]) {
+  for (const type of ["touchstart", "touchmove", "touchend", "dblclick", "contextmenu", "selectstart"]) {
+    target.addEventListener(type, cancel, { passive: false });
+  }
+}
+// Safari's pinch gesture events: never zoom the game.
+for (const type of ["gesturestart", "gesturechange"]) document.addEventListener(type, cancel, { passive: false });
+document.addEventListener("selectstart", (e) => {
+  if (state === "playing" && !(e.target instanceof HTMLInputElement)) e.preventDefault();
+});
 
 // Split-screen fallback: dragging anywhere on the canvas works as two pads,
 // which is how most players will instinctively try to drive.
