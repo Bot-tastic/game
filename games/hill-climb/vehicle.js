@@ -144,6 +144,21 @@ function groundContact(terrain, px, py, r) {
     const depth = r - d;
     if (!best || depth > best.depth) best = { nx: ox, ny: oy, depth, cx, cy };
   }
+  if (!best) {
+    // Tunnelling guard. The search above only finds surface within r of the
+    // centre; a hard landing or a fast pitch can shove a wheel deeper than
+    // that in one step, and it would then fall straight through the world.
+    // The ground is a heightfield, so "below the surface at x" means inside
+    // it: push the circle back out along the surface normal.
+    const gy = terrain.groundY(px);
+    if (py < gy) {
+      const slope = terrain.slopeAt(px);
+      const len = Math.hypot(slope, 1);
+      const nx = -slope / len;
+      const ny = 1 / len;
+      best = { nx, ny, depth: (gy - py) * ny + r, cx: px, cy: gy };
+    }
+  }
   return best;
 }
 
@@ -264,6 +279,26 @@ export function stepVehicle(car, terrain, stage, input, dt) {
           const j = -(1 + 0.12) * vn;
           w.vx += hit.nx * j;
           w.vy += hit.ny * j;
+        }
+        // Bump stop. The spring force is capped, so a hard enough landing
+        // drives the chassis down past full compression; without this the
+        // travel limit above would then push the wheel into the ground on
+        // the next substep. With the wheel on the ground and the suspension
+        // bottomed out, the ground holds the chassis up directly: lift it
+        // back to full compression and cancel its closing speed at the anchor.
+        const ab = anchorOf(car, i);
+        const bottom = -((w.x - ab.x) * upx + (w.y - ab.y) * upy);
+        if (bottom < MIN_LEN) {
+          car.x += upx * (MIN_LEN - bottom);
+          car.y += upy * (MIN_LEN - bottom);
+          const bx = ab.x - car.x;
+          const by = ab.y - car.y;
+          const close = (car.vx - car.av * by - w.vx) * upx + (car.vy + car.av * bx - w.vy) * upy;
+          if (close < 0) {
+            const cross = bx * upy - by * upx;
+            const j = -close / (1 / CM + (cross * cross) / INERTIA);
+            applyImpulse(car, upx * j, upy * j, ab.x, ab.y);
+          }
         }
         // Normal load drives the friction limit; suspension force is the
         // honest source for it, floored so a fully extended wheel still bites.
