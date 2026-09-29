@@ -5,7 +5,8 @@
 import { STAGES } from "../stages.js";
 import { createTerrain } from "../terrain.js";
 import { createVehicle, stepVehicle } from "../vehicle.js";
-import { tuningFrom, emptyLevels } from "../upgrades.js";
+import { tuningFrom, emptyLevels, uniformLevels, MAX_LEVEL } from "../upgrades.js";
+import { VEHICLES } from "../vehicles.js";
 
 const SECS = Number(process.argv[2] || 60);
 const DT = 1 / 60;
@@ -28,10 +29,10 @@ const DRIVERS = {
   },
 };
 
-function run(stage, levels, seed, driver = "reckless") {
+function run(stage, spec, levels, seed, driver = "reckless") {
   const terrain = createTerrain(stage, seed);
-  const tune = tuningFrom(levels);
-  const car = createVehicle(terrain, tune);
+  const tune = tuningFrom(spec, levels);
+  const car = createVehicle(terrain, spec, tune);
   let t = 0;
   let maxSpeed = 0;
   let maxY = -1e9;
@@ -60,20 +61,23 @@ function run(stage, levels, seed, driver = "reckless") {
 }
 
 let bad = 0;
+const only = process.argv[3];
 for (const stage of STAGES) {
-  for (const [name, levels] of [
+  for (const spec of VEHICLES.filter((v) => !only || v.id === only))
+  for (const [tier, levels] of [
     ["stock", emptyLevels()],
-    ["maxed", { engine: 5, suspension: 5, tires: 5, fuel: 5, awd: 5 }],
+    ["maxed", uniformLevels(MAX_LEVEL)],
   ]) {
+    const name = `${spec.id}/${tier}`;
     for (const [seed, driver] of [[1, "careful"], [7, "careful"], [99, "careful"], [1, "reckless"], [7, "reckless"]]) {
-      const r = run(stage, levels, seed, driver);
+      const r = run(stage, spec, levels, seed, driver);
       if (r.bad) {
         bad++;
         console.log(`FAIL ${stage.id}/${name}/${seed}/${driver}: ${r.bad} at t=${r.t.toFixed(1)}`);
         continue;
       }
       console.log(
-        `${stage.id.padEnd(12)} ${name.padEnd(6)} ${driver.padEnd(8)} seed=${String(seed).padEnd(3)} ` +
+        `${stage.id.padEnd(12)} ${name.padEnd(14)} ${driver.padEnd(8)} seed=${String(seed).padEnd(3)} ` +
           `dist=${r.dist.toFixed(0).padStart(5)}m  t=${r.t.toFixed(1).padStart(5)}s  ` +
           `vmax=${(r.maxSpeed * 3.6).toFixed(0).padStart(3)}km/h  ` +
           `air=${r.maxAir.toFixed(2)}s/${(r.airPct * 100).toFixed(0)}%  ` +

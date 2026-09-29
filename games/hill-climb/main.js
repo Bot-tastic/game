@@ -12,9 +12,10 @@ import {
   showToast,
 } from "../../shared/game-utils.js";
 import { STAGES, getStage, storeKey } from "./stages.js";
-import { LEVELS, getLevel, levelsOf, levelAfter } from "./levels.js";
+import { LEVELS, getLevel, levelsOf, levelAfter, coinValueOf } from "./levels.js";
 import { createTerrain, createPickups } from "./terrain.js";
-import { createVehicle, stepVehicle, hazardHit, WHEEL } from "./vehicle.js";
+import { createVehicle, stepVehicle, hazardHit } from "./vehicle.js";
+import { VEHICLES, getVehicle } from "./vehicles.js";
 import { createRenderer } from "./render.js";
 import { createFx, updateFx, clearFx, dirt, smoke, sparks, pop, shake, flash } from "./fx.js";
 import { createAudio } from "./audio.js";
@@ -45,15 +46,30 @@ const STAR_COINS = 0.6; // share of a level's coins that earns the second star
 // --- persistent state -------------------------------------------------------
 const LEVEL_KEYS = PARTS.map((p) => p.id);
 
-function loadLevels() {
+const hasKey = (k) => {
+  try {
+    return localStorage.getItem(storeKey(k)) != null;
+  } catch {
+    return false;
+  }
+};
+
+/** Upgrade levels of one car. Saves from before the garage had several cars
+ * stored the buggy's upgrades without a car id; those carry over. */
+function loadLevels(vid) {
   const out = emptyLevels();
-  for (const id of LEVEL_KEYS) out[id] = loadHighScore(storeKey(`up:${id}`), 0);
+  for (const id of LEVEL_KEYS) {
+    const key = `up:${vid}:${id}`;
+    const legacy = vid === "buggy" && !hasKey(key) ? loadHighScore(storeKey(`up:${id}`), 0) : 0;
+    out[id] = Math.min(MAX_LEVEL, loadHighScore(storeKey(key), legacy));
+  }
   return out;
 }
-const saveLevel = (id, v) => saveHighScore(storeKey(`up:${id}`), v);
+const saveLevel = (vid, id, v) => saveHighScore(storeKey(`up:${vid}:${id}`), v);
+const garageLevels = Object.fromEntries(VEHICLES.map((v) => [v.id, loadLevels(v.id)]));
+const owns = (v) => v.price === 0 || loadHighScore(storeKey(`own:${v.id}`), 0) > 0;
 
 let coins = loadHighScore(storeKey("coins"), 0);
-let levels = loadLevels();
 const bestOf = (id) => loadHighScore(storeKey(`best:${id}`), 0);
 const setBest = (id, v) => saveHighScore(storeKey(`best:${id}`), Math.round(v));
 const lifetimeBest = () => STAGES.reduce((m, s) => Math.max(m, bestOf(s.id)), 0);
@@ -93,6 +109,12 @@ let levelId = readPref("level", frontier().id);
 if (!getLevel(levelId) || !isLevelOpen(getLevel(levelId))) levelId = frontier().id;
 let worldView = getLevel(levelId).world;
 
+let vehicleId = readPref("vehicle", VEHICLES[0].id);
+if (!owns(getVehicle(vehicleId))) vehicleId = VEHICLES[0].id;
+let garageView = vehicleId; // the car shown in the garage, owned or not
+const currentSpec = () => getVehicle(vehicleId);
+const currentTune = () => tuningFrom(currentSpec(), garageLevels[vehicleId]);
+
 // --- run state --------------------------------------------------------------
 let state = "menu"; // menu | garage | playing | crashing | finishing | paused | over
 let level = null; // the campaign level being driven, or null in endless
@@ -101,6 +123,8 @@ let terrain = null;
 let pickups = null;
 let car = null;
 let fuel = FUEL_MAX;
+let fuelMax = FUEL_MAX;
+let coinValue = COIN_VALUE;
 let runCoins = 0;
 let coinsTaken = 0;
 let runDistance = 0;
@@ -254,14 +278,86 @@ const fmtTime = (s) => {
   return m ? `${m}:${r.toFixed(0).padStart(2, "0")}` : `${r.toFixed(1)}s`;
 };
 
+/** 0..1 bars for the garage card, relative to the best stock car. */
+function statBars(spec) {
+  const top = (v) => (v.fade * v.wheel.r) / 0.42; // wheel speed at half torque
+  const max = (f) => Math.max(...VEHICLES.map(f));
+  return [
+    ["Power", (spec.power / spec.chassis.mass) / max((v) => v.power / v.chassis.mass)],
+    ["Speed", top(spec) / max(top)],
+    ["Grip", (spec.grip * (1 + spec.awd * 0.6)) / max((v) => v.grip * (1 + v.awd * 0.6))],
+    ["Fuel", spec.fuel / max((v) => v.fuel)],
+  ];
+}
+
 function renderGarage() {
   el("garage-wallet").textContent = coins;
   el("wallet-value").textContent = coins;
+
+  const cars = el("vehicles");
+  cars.innerHTML = "";
+  for (const v of VEHICLES) {
+    const owned = owns(v);
+    const card = document.createElement("button");
+    card.className = "vehicle" + (v.id === garageView ? " on" : "") + (v.id === vehicleId ? " driving" : "") + (owned ? "" : " locked");
+    card.style.setProperty("--v-a", v.look.accent);
+    card.style.setProperty("--v-b", v.look.body[2]);
+    card.innerHTML = `
+      <span class="v-icon">${v.icon}</span>
+      <span class="v-name">${v.name}</span>
+      <span class="v-tag">${v.id === vehicleId ? "Driving" : owned ? "Owned" : `🪙 ${v.price.toLocaleString()}`}</span>
+    `;
+    card.addEventListener("click", () => {
+      audio.unlock();
+      audio.sfx("click");
+      garageView = v.id;
+      renderGarage();
+    });
+    cars.appendChild(card);
+  }
+
+  const spec = getVehicle(garageView);
+  const owned = owns(spec);
+  const lv = garageLevels[spec.id];
+  const detail = el("vehicle-detail");
+  detail.style.setProperty("--v-a", spec.look.accent);
+  detail.innerHTML = `
+    <div class="vd-head">
+      <span class="vd-icon">${spec.icon}</span>
+      <div><b>${spec.name}</b><span class="vd-blurb">${spec.blurb}</span></div>
+    </div>
+    <div class="vd-stats">${statBars(spec)
+      .map(([k, f]) => `<span class="vd-stat"><i>${k}</i><em><s style="width:${Math.round(f * 100)}%"></s></em></span>`)
+      .join("")}</div>
+    <button class="btn vd-action ${owned ? (spec.id === vehicleId ? "btn--ghost" : "btn--primary") : coins >= spec.price ? "btn--primary" : "btn--ghost"}" id="vd-action">
+      ${owned ? (spec.id === vehicleId ? "✓ Driving this" : "Drive this") : `Buy for 🪙 ${spec.price.toLocaleString()}`}
+    </button>
+  `;
+  el("vd-action").addEventListener("click", () => {
+    audio.unlock();
+    if (!owned) {
+      if (coins < spec.price) {
+        audio.sfx("deny");
+        showToast(toastEl, `Need ${(spec.price - coins).toLocaleString()} more coins`);
+        return;
+      }
+      coins -= spec.price;
+      saveHighScore(storeKey("coins"), coins);
+      saveHighScore(storeKey(`own:${spec.id}`), 1);
+      audio.sfx("buy");
+      showToast(toastEl, `${spec.name} unlocked!`, 1500);
+    } else audio.sfx("click");
+    vehicleId = spec.id;
+    writePref("vehicle", vehicleId);
+    renderGarage();
+  });
+
   const wrap = el("parts");
   wrap.innerHTML = "";
+  wrap.classList.toggle("locked", !owned);
   for (const part of PARTS) {
-    const lvl = levels[part.id] | 0;
-    const cost = nextCost(part, lvl);
+    const lvl = lv[part.id] | 0;
+    const cost = nextCost(part, lvl, spec);
     const row = document.createElement("div");
     row.className = "part" + (cost == null ? " maxed" : "");
     row.innerHTML = `
@@ -272,10 +368,10 @@ function renderGarage() {
         <span class="pips">${Array.from({ length: MAX_LEVEL }, (_, i) => `<i class="${i < lvl ? "on" : ""}"></i>`).join("")}</span>
         <span class="part-value">${part.label(lvl)}</span>
       </div>
-      <button class="buy" ${cost == null ? "disabled" : ""}>${cost == null ? "MAX" : `🪙 ${cost}`}</button>
+      <button class="buy" ${cost == null || !owned ? "disabled" : ""}>${cost == null ? "MAX" : `🪙 ${cost.toLocaleString()}`}</button>
     `;
     const buy = row.querySelector(".buy");
-    if (cost != null) {
+    if (cost != null && owned) {
       buy.classList.toggle("afford", coins >= cost);
       buy.addEventListener("click", () => {
         audio.unlock();
@@ -285,8 +381,8 @@ function renderGarage() {
           return;
         }
         coins -= cost;
-        levels[part.id] = lvl + 1;
-        saveLevel(part.id, levels[part.id]);
+        lv[part.id] = lvl + 1;
+        saveLevel(spec.id, part.id, lv[part.id]);
         saveHighScore(storeKey("coins"), coins);
         audio.sfx("buy");
         renderGarage();
@@ -294,6 +390,7 @@ function renderGarage() {
     }
     wrap.appendChild(row);
   }
+  el("parts-title").textContent = owned ? `${spec.name} upgrades` : `Buy the ${spec.name} to upgrade it`;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +403,8 @@ function buildWorld(withCar) {
   stage = getStage(level ? level.world : stageId);
   terrain = level ? createTerrain(stage, level.seed, level) : createTerrain(stage);
   pickups = createPickups(terrain, terrain.seed);
-  car = withCar ? createVehicle(terrain, tuningFrom(levels)) : null;
+  car = withCar ? createVehicle(terrain, currentSpec(), currentTune()) : null;
+  coinValue = level ? level.coinValue : coinValueOf(STAGES.indexOf(stage));
   camX = withCar ? car.x : 14;
   camY = (withCar ? car.y : terrain.groundY(14)) + 1;
   clearFx(fx);
@@ -320,7 +418,8 @@ function previewStage() {
 function startRun() {
   audio.unlock();
   buildWorld(true);
-  fuel = FUEL_MAX * tuningFrom(levels).fuel;
+  fuelMax = FUEL_MAX * currentTune().fuel;
+  fuel = fuelMax;
   runCoins = 0;
   coinsTaken = 0;
   runDistance = 0;
@@ -593,10 +692,12 @@ for (const b of document.querySelectorAll(".mode-tab")) {
 el("garage-btn").addEventListener("click", () => {
   audio.unlock();
   audio.sfx("click");
+  garageView = vehicleId;
   state = "garage";
   setScreen();
 });
 el("over-garage").addEventListener("click", () => {
+  garageView = vehicleId;
   state = "garage";
   setScreen();
 });
@@ -634,13 +735,13 @@ function collectPickups() {
     if (Math.hypot(it.x - car.x, it.y - car.y) > reach) continue;
     it.taken = true;
     if (it.kind === "coin") {
-      runCoins += COIN_VALUE;
+      runCoins += coinValue;
       coinsTaken++;
       audio.sfx("coin");
-      pop(fx, it.x, it.y + 0.4, `+${COIN_VALUE}`, "#ffd166");
+      pop(fx, it.x, it.y + 0.4, `+${coinValue}`, "#ffd166");
       sparks(fx, it.x, it.y, 6, "#ffd166");
     } else {
-      fuel = Math.min(FUEL_MAX * tuningFrom(levels).fuel, fuel + FUEL.pickup);
+      fuel = Math.min(fuelMax, fuel + FUEL.pickup * fuelMax);
       lowFuelWarned = false;
       audio.sfx("fuel");
       pop(fx, it.x, it.y + 0.5, "+FUEL", "#5ee6c8");
@@ -673,7 +774,7 @@ function scoreAerials() {
     }
     audio.sfx(air > 1.4 ? "bigland" : "land");
     shake(fx, Math.min(0.9, air * 0.45));
-    for (const w of car.wheels) dirt(fx, w.x, w.y - WHEEL.r, 0, Math.min(1, air), dustColor());
+    for (const w of car.wheels) dirt(fx, w.x, w.y - car.spec.wheel.r, 0, Math.min(1, air), dustColor());
   }
 }
 
@@ -722,7 +823,7 @@ function update(dt) {
     // Fuel burn, and a single warning as the tank runs low.
     if (fuel > 0) {
       fuel -= (FUEL.idle + Math.abs(cmd.throttle) * FUEL.gas) * dt;
-      if (fuel <= 22 && !lowFuelWarned) {
+      if (fuel <= fuelMax * 0.2 && !lowFuelWarned) {
         lowFuelWarned = true;
         audio.sfx("warn");
         showToast(toastEl, "Low fuel", 1100);
@@ -737,13 +838,14 @@ function update(dt) {
     // Wheelspin dust and exhaust smoke.
     for (const w of car.wheels) {
       if (w.onGround && Math.abs(w.slip) > 0.12) {
-        dirt(fx, w.x, w.y - WHEEL.r * 0.8, Math.sign(w.slip) || 1, Math.abs(w.slip), dustColor());
+        dirt(fx, w.x, w.y - car.spec.wheel.r * 0.8, Math.sign(w.slip) || 1, Math.abs(w.slip), dustColor());
       }
     }
     smokeTimer -= dt;
     if (smokeTimer <= 0 && driving) {
       smokeTimer = 0.09 + (cmd.throttle !== 0 ? 0 : 0.22);
-      smoke(fx, car.x - 1.15, car.y - 0.1, car.vx);
+      const back = car.spec.chassis.w / 2 + 0.15;
+      smoke(fx, car.x - Math.cos(car.angle) * back, car.y - Math.sin(car.angle) * back - 0.1, car.vx);
     }
 
     audio.engine(car.engineRpm, cmd.throttle !== 0 ? 1 : 0.25, Math.abs(car.wheels[0].slip), driving);
@@ -827,8 +929,7 @@ function updateHud(dt) {
   }
   el("coin-value").textContent = runCoins;
   el("speed-value").textContent = car ? Math.round(Math.abs(car.vx) * 3.6) : 0;
-  const maxFuel = FUEL_MAX * tuningFrom(levels).fuel;
-  const pct = Math.max(0, Math.min(1, fuel / maxFuel));
+  const pct = Math.max(0, Math.min(1, fuel / fuelMax));
   const fill = el("fuel-fill");
   fill.style.width = `${pct * 100}%`;
   fill.classList.toggle("warn", pct <= 0.3 && pct > 0.12);
