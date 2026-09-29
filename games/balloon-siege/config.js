@@ -22,6 +22,9 @@ export const PATH_RADIUS = 26;
 // same way or the labels lie — an early version gave the long "Relaxed" map
 // fast bloons, and it measured as the hardest map in the game because a thin
 // defence never got enough time per pass however long the track was.
+//
+// `theme` is purely cosmetic: render.js paints the ground, the track and a
+// scene of scenery (forest, desert, lake, volcano) from it.
 export const MAPS = [
   {
     id: "serpentine",
@@ -29,9 +32,12 @@ export const MAPS = [
     name: "Serpentine",
     difficulty: "Relaxed",
     blurb: "Four long lanes of switchback. Plenty of time to shoot.",
-    grass: "#1d3323",
-    grass2: "#16281c",
-    track: "#5b4a33",
+    theme: {
+      scene: "forest",
+      ground: ["#7fc85a", "#5aa843"],
+      tuft: ["#96dc6c", "#4c9338"],
+      path: ["#e6c98f", "#caa468", "#9c7442"],
+    },
     points: [
       [-60, 88], [1085, 88], [1195, 178], [1195, 222], [1090, 300],
       [150, 300], [58, 382], [58, 424], [152, 498], [1090, 498],
@@ -44,9 +50,12 @@ export const MAPS = [
     name: "Canyon Zigzag",
     difficulty: "Standard",
     blurb: "Hard corners and long diagonals. Crossfire heaven.",
-    grass: "#332420",
-    grass2: "#271b18",
-    track: "#6b5340",
+    theme: {
+      scene: "desert",
+      ground: ["#f0bd72", "#d8914f"],
+      tuft: ["#f8d596", "#c47a3e"],
+      path: ["#fbe3b2", "#e0b877", "#a8733f"],
+    },
     points: [
       [-60, 150], [300, 150], [430, 268], [1000, 210], [1120, 330],
       [980, 452], [320, 400], [180, 520], [300, 648], [900, 648],
@@ -59,9 +68,12 @@ export const MAPS = [
     name: "Meadow Run",
     difficulty: "Tricky",
     blurb: "A short open S-curve. Bloons reach the exit fast.",
-    grass: "#1b3030",
-    grass2: "#142626",
-    track: "#55483a",
+    theme: {
+      scene: "lake",
+      ground: ["#8fd86e", "#5fb85a"],
+      tuft: ["#b4ec8a", "#4a9e48"],
+      path: ["#d9d2c0", "#b7ad96", "#7f7560"],
+    },
     points: [
       [-60, 176], [330, 176], [438, 288], [438, 448], [648, 548],
       [1000, 548], [1092, 444], [1092, 246], [1340, 246],
@@ -73,9 +85,12 @@ export const MAPS = [
     name: "The Shortcut",
     difficulty: "Brutal",
     blurb: "Barely any track. Every single shot has to count.",
-    grass: "#2a2036",
-    grass2: "#1f182a",
-    track: "#5a4b6b",
+    theme: {
+      scene: "volcano",
+      ground: ["#4a3a4c", "#2c2233"],
+      tuft: ["#5e4a60", "#1f1824"],
+      path: ["#8a7686", "#6a5668", "#3a2c3a"],
+    },
     points: [
       [-60, 292], [360, 292], [478, 420], [700, 420], [818, 276],
       [1058, 276], [1160, 400], [1340, 400],
