@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <title>Balloon Siege</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../../shared/theme.css" />
   <link rel="stylesheet" href="../../shared/components.css" />
   <link rel="stylesheet" href="./style.css" />
@@ -21,8 +24,8 @@
             <span class="k">🐒</span><span class="v" id="hero-level">1</span>
             <span class="xp"><i id="hero-xp"></i></span>
           </div>
-          <div class="stat-chip stat-chip--lives"><span class="k">♥</span><span class="v" id="lives-value">100</span></div>
-          <div class="stat-chip stat-chip--cash"><span class="k">$</span><span class="v" id="cash-value">700</span></div>
+          <div class="stat-chip stat-chip--lives"><span class="k">❤️</span><span class="v" id="lives-value">100</span></div>
+          <div class="stat-chip stat-chip--cash"><span class="k">💰</span><span class="v" id="cash-value">700</span></div>
           <div class="stat-chip"><span class="k">Round</span><span class="v" id="round-value">1/40</span></div>
         </div>
       </header>
@@ -86,8 +89,13 @@
 
   <!-- Menu -------------------------------------------------------------- -->
   <section class="overlay overlay--menu" id="menu-overlay">
+    <div class="sky" aria-hidden="true">
+      <i class="cloud c1"></i><i class="cloud c2"></i><i class="cloud c3"></i>
+      <i class="bln b1"></i><i class="bln b2"></i><i class="bln b3"></i><i class="bln b4"></i>
+      <i class="bln b5"></i><i class="bln b6"></i><i class="bln b7"></i>
+    </div>
     <div class="menu-inner">
-      <h1 class="logo">BALLOON<span>SIEGE</span></h1>
+      <h1 class="logo"><span class="l1">Balloon</span><span class="l2">Siege</span></h1>
       <p class="tagline">Build the gauntlet. Level your hero. Pop everything.</p>
 
       <h2 class="section-label">Map</h2>
@@ -103,7 +111,7 @@
   </section>
 
   <!-- Pause ------------------------------------------------------------- -->
-  <section class="overlay" id="pause-overlay" hidden>
+  <section class="overlay overlay--card" id="pause-overlay" hidden>
     <h2>Paused</h2>
     <p class="stat">Round <strong id="pause-round">1</strong></p>
     <div class="actions">
@@ -113,7 +121,7 @@
   </section>
 
   <!-- End --------------------------------------------------------------- -->
-  <section class="overlay" id="end-overlay" hidden>
+  <section class="overlay overlay--card" id="end-overlay" hidden>
     <h2 id="end-title">Defeat</h2>
     <p class="stat">Reached round <strong id="end-round">1</strong></p>
     <p class="stat">Bloons popped <strong id="end-pops">0</strong></p>

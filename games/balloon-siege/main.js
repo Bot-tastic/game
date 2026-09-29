@@ -13,7 +13,10 @@ import {
   TARGET_MODES, abilityOf, activateAbility, alreadyPlaced, buyUpgrade, canPlace, canStartRound,
   createGame, placeTower, sellTower, startRound, towerStats, update,
 } from "./game.js";
-import { drawBloons, drawEffects, drawProjectiles, drawRange, drawTower, drawTowers, invalidateMapLayer, paintMapInto } from "./render.js";
+import {
+  TOWER_LOOK, drawBloons, drawEffects, drawProjectiles, drawRange, drawTower, drawTowers,
+  invalidateMapLayer, paintMapInto, paintMapThumb,
+} from "./render.js";
 import { createFx, drawFx, drawOverlayFx, handleEvent, updateFx } from "./fx.js";
 import { isMuted, resumeAudio, setMuted, sfx } from "./audio.js";
 
@@ -116,25 +119,9 @@ function toWorld(x, y) {
 
 // ----------------------------------------------------------------- menu ----
 
-/** Tiny map thumbnail so the player can see the track before committing. */
+/** Map thumbnail, painted by the same code as the board itself. */
 function drawThumb(cv, map) {
-  const W = 240;
-  const H = 240 * (WORLD.h / WORLD.w);
-  cv.width = W;
-  cv.height = H;
-  const c = cv.getContext("2d");
-  const s = W / WORLD.w;
-  c.fillStyle = map.grass;
-  c.fillRect(0, 0, W, H);
-  const path = buildPath(map.points);
-  c.beginPath();
-  c.moveTo(path.points[0][0] * s, path.points[0][1] * s);
-  for (let i = 1; i < path.points.length; i++) c.lineTo(path.points[i][0] * s, path.points[i][1] * s);
-  c.lineWidth = 14 * s;
-  c.lineCap = "round";
-  c.lineJoin = "round";
-  c.strokeStyle = map.track;
-  c.stroke();
+  paintMapThumb(cv, map, buildPath(map.points));
 }
 
 function buildMenu() {
@@ -172,6 +159,7 @@ function buildMenu() {
     card.className = "diff-card";
     card.type = "button";
     card.dataset.diff = d.id;
+    card.classList.add(`diff-card--${d.id}`);
     card.innerHTML = `<span class="dc-name"></span><span class="dc-sub"></span>`;
     card.querySelector(".dc-name").textContent = d.name;
     card.querySelector(".dc-sub").textContent = `${d.lives} lives · $${d.cash}`;
@@ -206,6 +194,7 @@ function buildShop() {
     item.className = `shop-item${def.hero ? " shop-item--hero" : ""}`;
     item.type = "button";
     item.dataset.tower = def.id;
+    item.style.setProperty("--c", TOWER_LOOK[def.id]?.color ?? "#8a93a6");
     item.innerHTML = `<span class="si-icon"></span><span class="si-name"></span><span class="si-cost"></span>`;
     item.querySelector(".si-icon").textContent = def.icon;
     item.querySelector(".si-name").textContent = def.name;
@@ -264,6 +253,7 @@ function refreshInspector() {
   const stats = towerStats(tower);
 
   $("insp-icon").textContent = def.icon;
+  $("inspector").style.setProperty("--c", TOWER_LOOK[def.id]?.color ?? "#8a93a6");
   $("insp-name").textContent = def.name;
   $("insp-detail").textContent = statLine(def, stats);
   $("target-btn").textContent = tower.target[0].toUpperCase() + tower.target.slice(1);

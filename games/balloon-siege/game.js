@@ -631,6 +631,9 @@ function updateBloons(state, dt) {
     const p = pointAt(state.path, b.dist);
     b.x = p.x;
     b.y = p.y;
+    // Heading along the track, only read by the renderer to turn blimps.
+    b.dx = p.dx;
+    b.dy = p.dy;
     alive.push(b);
   }
   state.bloons = alive;
