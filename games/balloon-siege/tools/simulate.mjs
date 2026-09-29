@@ -3,6 +3,7 @@
 //   node games/balloon-siege/tools/simulate.mjs                 full sweep
 //   node games/balloon-siege/tools/simulate.mjs canyon hard     one verbose run
 //   node games/balloon-siege/tools/simulate.mjs --leaks [runs]  leaked-lives table
+//   node games/balloon-siege/tools/simulate.mjs --endless       endless survival round
 //
 // The leaks table is the one to tune against: it plays with unlimited lives, so
 // it reports how much threat got through rather than a coarse win/lose flag.
@@ -23,6 +24,16 @@ if (arg1 === "--leaks") {
       cells.push(`${diff.id}:${String(Math.round(total / runs)).padStart(5)}`);
     }
     console.log(`${map.id.padEnd(11)} ${map.difficulty.padEnd(9)} ${cells.join("  ")}`);
+  }
+} else if (arg1 === "--endless") {
+  // How far the reference bot survives in endless mode, per map and difficulty.
+  for (const map of MAPS) {
+    const cells = [];
+    for (const diff of DIFFICULTIES) {
+      const s = playRun(map.id, diff.id, { endlessMode: true });
+      cells.push(`${diff.id}:r${String(s.round).padStart(3)}`);
+    }
+    console.log(`${map.id.padEnd(11)} ${cells.join("  ")}`);
   }
 } else if (arg1) {
   const log = [];

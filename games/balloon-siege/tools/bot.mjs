@@ -108,9 +108,12 @@ function useAbilities(state) {
  * is total lives leaked — a continuous signal, which is what tuning needs.
  * A win/lose flag alone is too coarse: spawnCluster uses Math.random(), so a
  * knife-edge build flips outcomes between runs for no real reason.
+ *
+ * `endlessMode` plays the real endless mode (rounds past 40) with real lives,
+ * stopping at `maxRound`.
  */
-export function playRun(mapId, difficultyId, { endless = false, onRound } = {}) {
-  const state = createGame({ mapId, difficultyId });
+export function playRun(mapId, difficultyId, { endless = false, endlessMode = false, maxRound = 200, onRound } = {}) {
+  const state = createGame({ mapId, difficultyId, endless: endlessMode });
   if (endless) state.lives = 1e7;
   const plan = PLAN.map((p) => ({ ...p }));
 
@@ -125,7 +128,7 @@ export function playRun(mapId, difficultyId, { endless = false, onRound } = {}) 
     while (state.phase === "wave" && t < 400) tick();
     while (state.bloons.length > 0 && state.phase !== "lost" && t < 600) tick();
     onRound?.({ round, secs: t, leaked: state.leaked - leakAtStart, cashAtStart, state });
-    if (state.phase === "lost") break;
+    if (state.phase === "lost" || state.round > maxRound) break;
   }
   return state;
 }

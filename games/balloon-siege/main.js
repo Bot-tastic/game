@@ -4,14 +4,14 @@
 import { createLoop, lockViewport, loadHighScore, onPointer, saveHighScore, showToast } from "../../shared/game-utils.js";
 import { BLOONS, DIFFICULTIES, MAPS, WORLD } from "./config.js";
 import { buildPath } from "./path.js";
-import { ROUND_COUNT, ROUND_TITLES, roundPreview } from "./rounds.js";
+import { ROUND_COUNT, roundPreview, roundTitle } from "./rounds.js";
 import {
   ALL_TOWERS, HERO, HERO_ID, HERO_MAX_LEVEL, TOWER_BY_ID, TOWER_RADIUS,
   heroProgress, nextUpgrade, sellValue, upgradeBlocked,
 } from "./towers.js";
 import {
   TARGET_MODES, abilityOf, activateAbility, alreadyPlaced, buyUpgrade, canPlace, canStartRound,
-  createGame, placeTower, sellTower, startRound, towerStats, update,
+  createGame, placeTower, restoreGame, sellTower, serializeGame, startRound, towerStats, update,
 } from "./game.js";
 import {
   TOWER_LOOK, drawBloons, drawEffects, drawProjectiles, drawRange, drawTower, drawTowers,
@@ -27,7 +27,11 @@ const FIXED_DT = 1 / 60;
 const MAX_CATCHUP = 0.5;
 // Narrow layouts need enough dock left for the shop and an open upgrade panel.
 const MIN_DOCK_H = 232;
-const BEST_KEY = (map, diff) => `balloon-siege:best:${map}:${diff}`;
+const BEST_KEY = (map, diff, endless = false) => `balloon-siege:best:${map}:${diff}${endless ? ":endless" : ""}`;
+// One save slot: the run in progress. Written on "Save & exit", at the end of
+// every round and whenever the page is hidden, so closing the tab or the phone
+// killing it never costs more than a few seconds of play.
+const SAVE_KEY = "balloon-siege:save";
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
@@ -53,6 +57,39 @@ let abilitySig = "";
 
 let chosenMap = MAPS[0].id;
 let chosenDiff = "normal";
+let chosenEndless = false;
+// True while a run the player actually started is on the board. The idle game
+// that sits behind the menu at load must never be written over a real save.
+let runActive = false;
+
+// ------------------------------------------------------------------ save ---
+
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSave() {
+  if (!runActive || !state || state.phase === "won" || state.phase === "lost") return false;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(serializeGame(state)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {
+    /* storage blocked: nothing to clear */
+  }
+}
 
 // ------------------------------------------------------------- viewport ----
 
@@ -169,18 +206,53 @@ function buildMenu() {
     });
     row.append(card);
   }
+  const modes = $("mode-row");
+  modes.innerHTML = "";
+  for (const m of [
+    { endless: false, name: "Classic", sub: `${ROUND_COUNT} rounds · win the map` },
+    { endless: true, name: "Endless ∞", sub: "Never stops · gets tougher every round" },
+  ]) {
+    const card = document.createElement("button");
+    card.className = `diff-card mode-card${m.endless ? " mode-card--endless" : ""}`;
+    card.type = "button";
+    card.dataset.endless = String(m.endless);
+    card.innerHTML = `<span class="dc-name"></span><span class="dc-sub"></span>`;
+    card.querySelector(".dc-name").textContent = m.name;
+    card.querySelector(".dc-sub").textContent = m.sub;
+    card.addEventListener("click", () => {
+      chosenEndless = m.endless;
+      refreshMenu();
+    });
+    modes.append(card);
+  }
   refreshMenu();
 }
 
 function refreshMenu() {
+  for (const el of document.querySelectorAll(".mode-card")) {
+    el.classList.toggle("selected", el.dataset.endless === String(chosenEndless));
+  }
+  const save = readSave();
+  const box = $("continue-box");
+  box.hidden = !save;
+  if (save) {
+    const map = MAPS.find((m) => m.id === save.mapId);
+    const diff = DIFFICULTIES.find((d) => d.id === save.difficultyId);
+    $("continue-sub").textContent =
+      `${map?.name ?? save.mapId} · ${diff?.name ?? ""} · ${save.endless ? "Endless" : "Classic"} · ` +
+      `Round ${save.round} · ❤️ ${save.lives} · 💰 ${save.cash}`;
+  }
   for (const el of document.querySelectorAll(".map-card")) {
     el.classList.toggle("selected", el.dataset.map === chosenMap);
   }
   for (const el of document.querySelectorAll(".diff-card")) {
     el.classList.toggle("selected", el.dataset.diff === chosenDiff);
   }
-  const best = loadHighScore(BEST_KEY(chosenMap, chosenDiff), 0);
-  $("best-line").textContent = best > 0 ? `Best on this map: round ${best}` : "No run here yet.";
+  const best = loadHighScore(BEST_KEY(chosenMap, chosenDiff, chosenEndless), 0);
+  $("best-line").textContent = best > 0
+    ? `Best on this map${chosenEndless ? " (endless)" : ""}: round ${best}`
+    : "No run here yet.";
+  $("play-btn").textContent = save ? "New game" : "Play";
   $("rotate-note").hidden = window.innerWidth > window.innerHeight;
 }
 
@@ -397,7 +469,7 @@ function bindInput() {
 function refreshPreview() {
   const box = $("preview");
   box.innerHTML = "";
-  if (state.round > ROUND_COUNT) return;
+  if (!state.endless && state.round > ROUND_COUNT) return;
   for (const { type, camo } of roundPreview(state.round)) {
     const chip = document.createElement("span");
     chip.className = `pv${camo ? " camo" : ""}`;
@@ -421,10 +493,10 @@ function refreshHud() {
     $("cash-value").textContent = state.cash;
     refreshAffordability();
   }
-  const shownRound = Math.min(state.round, ROUND_COUNT);
+  const shownRound = state.endless ? state.round : Math.min(state.round, ROUND_COUNT);
   if (hudShown.round !== shownRound) {
     hudShown.round = shownRound;
-    $("round-value").textContent = `${shownRound}/${ROUND_COUNT}`;
+    $("round-value").textContent = state.endless ? `${shownRound} ∞` : `${shownRound}/${ROUND_COUNT}`;
     // Rounds advance inside update() now, not only through beginRound, so the
     // "what is coming" chips have to follow the counter rather than the button.
     refreshPreview();
@@ -494,8 +566,32 @@ function beginRound() {
 // ------------------------------------------------------------------ flow ---
 
 function newGame() {
+  startRun(createGame({ mapId: chosenMap, difficultyId: chosenDiff, endless: chosenEndless }));
+  // A new run replaces whatever was saved; it is written again at round end.
+  clearSave();
+}
+
+function continueGame() {
+  const restored = restoreGame(readSave());
+  if (!restored) {
+    clearSave();
+    showToast($("toast"), "Save could not be loaded");
+    refreshMenu();
+    return;
+  }
+  chosenMap = restored.map.id;
+  chosenDiff = restored.difficulty.id;
+  chosenEndless = restored.endless;
+  startRun(restored);
+  // Always come back paused: nobody wants a wave already walking the moment
+  // the menu disappears.
+  if (state.bloons.length > 0 || state.phase === "wave") openPause();
+}
+
+function startRun(next) {
   for (const k of Object.keys(hudShown)) hudShown[k] = null;
-  state = createGame({ mapId: chosenMap, difficultyId: chosenDiff });
+  state = next;
+  runActive = true;
   fx = createFx();
   selection = { placing: null, tower: null, pointer: null, valid: false };
   paused = false;
@@ -515,14 +611,36 @@ function newGame() {
   refreshPreview();
 }
 
+function openPause() {
+  if (!state) return;
+  paused = true;
+  $("pause-round").textContent = state.endless ? state.round : Math.min(state.round, ROUND_COUNT);
+  $("pause-overlay").hidden = false;
+}
+
+function toMenu() {
+  paused = false;
+  runActive = false;
+  $("pause-overlay").hidden = true;
+  $("end-overlay").hidden = true;
+  $("menu-overlay").hidden = false;
+  refreshMenu();
+}
+
 function endGame() {
-  const reached = state.phase === "won" ? ROUND_COUNT : Math.min(state.round, ROUND_COUNT);
-  const key = BEST_KEY(state.map.id, state.difficulty.id);
+  runActive = false;
+  clearSave();
+  // In endless the last round survived is the score; state.round is the one
+  // that broke through.
+  const reached = state.phase === "won"
+    ? ROUND_COUNT
+    : state.endless ? Math.max(1, state.round) : Math.min(state.round, ROUND_COUNT);
+  const key = BEST_KEY(state.map.id, state.difficulty.id, state.endless);
   const best = loadHighScore(key, 0);
   if (reached > best) saveHighScore(key, reached);
 
   $("end-title").textContent = state.phase === "won" ? "Map cleared!" : "Overrun";
-  $("end-round").textContent = `${reached}/${ROUND_COUNT}`;
+  $("end-round").textContent = state.endless ? `${reached} ∞` : `${reached}/${ROUND_COUNT}`;
   $("end-pops").textContent = state.popsTotal;
   $("end-hero").textContent = `${state.heroLevel}/${HERO_MAX_LEVEL}`;
   $("end-best").textContent = reached > best ? "New best on this map!" : `Best here: round ${Math.max(best, reached)}`;
@@ -534,7 +652,7 @@ function endGame() {
 function drainEvents() {
   for (const ev of state.events) {
     if (ev.kind === "roundStart") {
-      handleEvent(fx, { ...ev, title: `Round ${ev.round}`, sub: ROUND_TITLES[ev.round] ?? "" });
+      handleEvent(fx, { ...ev, title: `Round ${ev.round}`, sub: roundTitle(ev.round, state.endless) });
       continue;
     }
     handleEvent(fx, ev);
@@ -542,7 +660,10 @@ function drainEvents() {
     else if (ev.kind === "shoot") sfx.shoot();
     else if (ev.kind === "blast") sfx.blast();
     else if (ev.kind === "leak") sfx.leak();
-    else if (ev.kind === "roundEnd") sfx.roundEnd();
+    else if (ev.kind === "roundEnd") {
+      sfx.roundEnd();
+      writeSave();
+    }
     else if (ev.kind === "heroLevel") sfx.upgrade();
   }
   state.events.length = 0;
@@ -690,18 +811,30 @@ function bindUi() {
     paused = false;
     $("pause-overlay").hidden = true;
   });
+  $("pause-btn").addEventListener("click", () => {
+    resumeAudio();
+    if (runActive) openPause();
+  });
+  $("save-btn").addEventListener("click", () => {
+    if (writeSave()) {
+      showToast($("toast"), "Game saved");
+      toMenu();
+    } else {
+      showToast($("toast"), "Could not save here");
+    }
+  });
   $("quit-btn").addEventListener("click", () => {
-    paused = false;
-    $("pause-overlay").hidden = true;
-    $("menu-overlay").hidden = false;
-    refreshMenu();
+    // Giving up is the one way to throw a run away on purpose.
+    if (!window.confirm("Abandon this run? It will not be saved.")) return;
+    clearSave();
+    toMenu();
+  });
+  $("continue-btn").addEventListener("click", () => {
+    resumeAudio();
+    continueGame();
   });
   $("retry-btn").addEventListener("click", newGame);
-  $("menu-btn").addEventListener("click", () => {
-    $("end-overlay").hidden = true;
-    $("menu-overlay").hidden = false;
-    refreshMenu();
-  });
+  $("menu-btn").addEventListener("click", toMenu);
 
   document.addEventListener("keydown", (e) => {
     if (!state) return;
@@ -709,9 +842,18 @@ function bindUi() {
       e.preventDefault();
       beginRound();
     } else if (e.code === "Escape") {
-      selection.placing = null;
-      selection.tower = null;
-      refreshDock();
+      if (selection.placing || selection.tower) {
+        selection.placing = null;
+        selection.tower = null;
+        refreshDock();
+      } else if (runActive && !overlayUp()) {
+        openPause();
+      } else if (!$("pause-overlay").hidden) {
+        paused = false;
+        $("pause-overlay").hidden = true;
+      }
+    } else if (e.code === "KeyP" && runActive && !overlayUp()) {
+      openPause();
     } else if (e.code.startsWith("Digit")) {
       // 1-9 fire the abilities in bar order, so a keyboard player never has to
       // hunt for a 52px circle mid-wave.
@@ -721,14 +863,14 @@ function bindUi() {
     }
   });
 
-  // Pausing on tab-away stops a backgrounded round quietly losing the run.
+  // Pausing on tab-away stops a backgrounded round quietly losing the run, and
+  // saving then means a phone that kills the tab does not lose it either.
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && state && state.bloons.length > 0) {
-      paused = true;
-      $("pause-round").textContent = Math.min(state.round, ROUND_COUNT);
-      $("pause-overlay").hidden = false;
-    }
+    if (!document.hidden || !runActive) return;
+    writeSave();
+    if (state.bloons.length > 0 && $("pause-overlay").hidden) openPause();
   });
+  window.addEventListener("pagehide", writeSave);
 }
 
 livesChip = document.querySelector(".stat-chip--lives");

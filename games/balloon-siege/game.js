@@ -7,7 +7,7 @@
 
 import { BLOONS, DIFFICULTIES, GAME_SPEED, MAPS, WORLD, canDamage, totalPops } from "./config.js";
 import { buildPath, offPath, pointAt } from "./path.js";
-import { ROUND_COUNT, buildSchedule, roundReward } from "./rounds.js";
+import { ROUND_COUNT, buildSchedule, endlessScale, roundReward } from "./rounds.js";
 import {
   HERO_ID, HERO_MAX_LEVEL, TOWER_BY_ID, TOWER_RADIUS,
   heroLevel, nextUpgrade, resolveStats, sellValue, upgradeBlocked,
@@ -17,13 +17,17 @@ export const TARGET_MODES = ["first", "last", "strong", "close"];
 
 let nextId = 1;
 
-export function createGame({ mapId, difficultyId, startRound = 1 }) {
+/** `endless` keeps generating rounds past 40 instead of ending the run. */
+export function createGame({ mapId, difficultyId, startRound = 1, endless = false }) {
   const map = MAPS.find((m) => m.id === mapId) ?? MAPS[0];
   const difficulty = DIFFICULTIES.find((d) => d.id === difficultyId) ?? DIFFICULTIES[1];
   return {
     map,
     path: buildPath(map.points),
     difficulty,
+    endless,
+    // Toughness of the round currently spawning (endless mode only).
+    scale: endlessScale(startRound),
     lives: difficulty.lives,
     cash: difficulty.cash,
     round: startRound,
@@ -220,13 +224,14 @@ function updateEffects(state, dt) {
  * spawned. Sending the next wave early is the main way an aggressive player
  * gets ahead on cash, and it is what stops the mid-game from being a wait. */
 export function canStartRound(state) {
-  if (state.phase === "build") return state.round <= ROUND_COUNT;
+  if (state.phase === "build") return state.endless || state.round <= ROUND_COUNT;
   return false;
 }
 
 export function startRound(state) {
   if (!canStartRound(state)) return false;
   state.schedule = buildSchedule(state.round);
+  state.scale = endlessScale(state.round);
   state.spawnIdx = 0;
   state.waveTime = 0;
   state.phase = "wave";
@@ -236,12 +241,14 @@ export function startRound(state) {
 
 function spawnBloon(state, type, camo, dist = 0) {
   const def = BLOONS[type];
+  // Endless rounds toughen the multi-hit bloons; a 1-hp bloon stays 1 hp.
+  const hp = def.hp > 1 ? Math.round(def.hp * (state.scale?.hp ?? 1)) : def.hp;
   state.bloons.push({
     id: nextId++,
     type,
     dist,
-    hp: def.hp,
-    maxHp: def.hp,
+    hp,
+    maxHp: hp,
     camo,
     r: def.r,
     slowT: 0,
@@ -611,7 +618,7 @@ function updateBloons(state, dt) {
     if (b.hp <= 0) continue;
     const def = BLOONS[b.type];
 
-    let speed = def.speed * state.map.speedMul;
+    let speed = def.speed * state.map.speedMul * (state.scale?.speed ?? 1);
     if (b.freezeT > 0) {
       b.freezeT -= dt;
       speed = 0;
@@ -669,10 +676,93 @@ export function update(state, realDt) {
   if (state.phase === "wave" && state.spawnIdx >= state.schedule.length) endRound(state);
 
   // The run is only won once the last round is both sent and cleaned up.
-  if (state.phase === "build" && state.round > ROUND_COUNT && state.bloons.length === 0) {
+  if (!state.endless && state.phase === "build" && state.round > ROUND_COUNT && state.bloons.length === 0) {
     state.phase = "won";
     state.events.push({ kind: "won" });
   }
+}
+
+// ----------------------------------------------------------- save / load ---
+// A run is saved as plain JSON, mid-wave included. What is left out is only
+// what rebuilds itself: the spawn schedule (seeded by round number), memoised
+// tower stats, positions (recomputed from distance along the track), and
+// darts in flight, which are a fraction of a second of damage.
+
+export const SAVE_VERSION = 1;
+
+const BLOON_KEYS = ["id", "type", "dist", "hp", "maxHp", "camo", "r", "slowT", "slowAmt", "freezeT"];
+const TOWER_KEYS = ["id", "defId", "x", "y", "tiers", "level", "cooldown", "abilityCd", "buffT", "angle", "target", "shotCount", "pops"];
+
+function pick(obj, keys) {
+  const out = {};
+  for (const k of keys) out[k] = obj[k];
+  return out;
+}
+
+export function serializeGame(state) {
+  return {
+    v: SAVE_VERSION,
+    savedAt: Date.now(),
+    mapId: state.map.id,
+    difficultyId: state.difficulty.id,
+    endless: !!state.endless,
+    lives: state.lives,
+    cash: state.cash,
+    round: state.round,
+    phase: state.phase,
+    spawnIdx: state.spawnIdx,
+    waveTime: state.waveTime,
+    leaked: state.leaked,
+    popsTotal: state.popsTotal,
+    cashEarned: state.cashEarned,
+    heroXp: state.heroXp,
+    heroLevel: state.heroLevel,
+    bloons: state.bloons.filter((b) => b.hp > 0).map((b) => pick(b, BLOON_KEYS)),
+    towers: state.towers.map((t) => pick(t, TOWER_KEYS)),
+    effects: state.effects.map((e) => ({
+      x: e.x, y: e.y, radius: e.radius, dmg: e.dmg, ticksLeft: e.ticksLeft,
+      interval: e.interval, t: e.t, color: e.color, ownerId: e.owner?.id ?? null,
+    })),
+  };
+}
+
+/** Rebuild a live game from serializeGame output, or null if it is unusable. */
+export function restoreGame(data) {
+  if (!data || data.v !== SAVE_VERSION || !MAPS.some((m) => m.id === data.mapId)) return null;
+  const state = createGame({ mapId: data.mapId, difficultyId: data.difficultyId, endless: data.endless });
+  for (const k of ["lives", "cash", "round", "spawnIdx", "waveTime", "leaked", "popsTotal", "cashEarned", "heroXp", "heroLevel"]) {
+    if (typeof data[k] === "number") state[k] = data[k];
+  }
+  state.phase = data.phase === "wave" ? "wave" : "build";
+  if (state.phase === "wave") {
+    state.schedule = buildSchedule(state.round);
+    state.scale = endlessScale(state.round);
+  } else {
+    // Bloons still walking from the last round keep that round's toughness
+    // only in their hp; speed follows the most recent round sent.
+    state.scale = endlessScale(Math.max(1, state.round - 1));
+  }
+
+  let maxId = 0;
+  state.towers = (data.towers ?? []).filter((t) => TOWER_BY_ID[t.defId]).map((t) => {
+    maxId = Math.max(maxId, t.id);
+    const tower = { ...t, tiers: [...(t.tiers ?? [0, 0])], buff: null };
+    // A running buff is always the tower's own ability, so it is looked up
+    // again rather than stored.
+    if (tower.buffT > 0) tower.buff = towerStats(tower).ability ?? null;
+    return tower;
+  });
+  state.bloons = (data.bloons ?? []).filter((b) => BLOONS[b.type]).map((b) => {
+    maxId = Math.max(maxId, b.id);
+    const p = pointAt(state.path, b.dist);
+    return { ...b, x: p.x, y: p.y, dx: p.dx, dy: p.dy };
+  });
+  const byId = new Map(state.towers.map((t) => [t.id, t]));
+  state.effects = (data.effects ?? [])
+    .filter((e) => byId.has(e.ownerId))
+    .map(({ ownerId, ...e }) => ({ ...e, owner: byId.get(ownerId) }));
+  nextId = Math.max(nextId, maxId + 1);
+  return state;
 }
 
 export { ROUND_COUNT };
