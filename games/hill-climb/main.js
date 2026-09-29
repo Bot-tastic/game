@@ -21,6 +21,7 @@ import { createFx, updateFx, clearFx, dirt, smoke, sparks, pop, shake, flash } f
 import { createAudio } from "./audio.js";
 import { PARTS, MAX_LEVEL, nextCost, tuningFrom, emptyLevels } from "./upgrades.js";
 import { FUEL, COIN_VALUE, AIR_BONUS, FLIP_BONUS } from "./rules.js";
+import { CODES, hashCode, normalizeCode } from "./codes.js";
 
 const canvas = document.getElementById("game");
 const renderer = createRenderer(canvas);
@@ -30,6 +31,7 @@ const fx = createFx();
 const el = (id) => document.getElementById(id);
 const menuOverlay = el("menu-overlay");
 const garageOverlay = el("garage-overlay");
+const codesOverlay = el("codes-overlay");
 const pauseOverlay = el("pause-overlay");
 const overOverlay = el("over-overlay");
 const hud = el("hud");
@@ -92,9 +94,11 @@ const writePref = (k, v) => {
 // Campaign progress: stars (0..3) and best time per level.
 const starsOf = (lvl) => loadHighScore(storeKey(`lv:${lvl.id}`), 0);
 const bestTimeOf = (lvl) => loadHighScore(storeKey(`lvt:${lvl.id}`), 0);
+// A gift code can open every level at once.
+const allUnlocked = () => loadHighScore(storeKey("unlock:levels"), 0) > 0;
 const isLevelOpen = (lvl) => {
   const i = LEVELS.indexOf(lvl);
-  return i === 0 || starsOf(LEVELS[i - 1]) > 0;
+  return i === 0 || allUnlocked() || starsOf(LEVELS[i - 1]) > 0;
 };
 const totalStars = () => LEVELS.reduce((n, l) => n + starsOf(l), 0);
 /** Endless stages open with the world's first level, or the old distance rule. */
@@ -116,7 +120,8 @@ const currentSpec = () => getVehicle(vehicleId);
 const currentTune = () => tuningFrom(currentSpec(), garageLevels[vehicleId]);
 
 // --- run state --------------------------------------------------------------
-let state = "menu"; // menu | garage | playing | crashing | finishing | paused | over
+let state = "menu"; // menu | garage | codes | playing | crashing | finishing | paused | over
+let codesReturn = "menu"; // where the gift-code panel goes back to
 let level = null; // the campaign level being driven, or null in endless
 let stage = getStage(mode === "levels" ? getLevel(levelId).world : stageId);
 let terrain = null;
@@ -566,6 +571,7 @@ function quitRun() {
 function setScreen() {
   menuOverlay.hidden = state !== "menu";
   garageOverlay.hidden = state !== "garage";
+  codesOverlay.hidden = state !== "codes";
   pauseOverlay.hidden = state !== "paused";
   overOverlay.hidden = state !== "over";
   const live = state === "playing" || state === "paused" || state === "finishing" || state === "crashing";
@@ -629,8 +635,11 @@ const releaseCanvas = () => {
 canvas.addEventListener("pointerup", releaseCanvas);
 canvas.addEventListener("pointercancel", releaseCanvas);
 
+// Typing a gift code must not steer the car or pause the game.
+const typing = (e) => e.target instanceof HTMLInputElement;
+
 window.addEventListener("keydown", (e) => {
-  if (e.repeat) return;
+  if (e.repeat || typing(e)) return;
   const k = e.key.toLowerCase();
   if (k === "arrowright" || k === "d" || k === " ") {
     input.gas = true;
@@ -648,6 +657,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "m") toggleMute();
 });
 window.addEventListener("keyup", (e) => {
+  if (typing(e)) return;
   const k = e.key.toLowerCase();
   if (k === "arrowright" || k === "d" || k === " ") input.gas = false;
   if (k === "arrowleft" || k === "a") input.brake = false;
@@ -712,6 +722,68 @@ el("over-stages").addEventListener("click", () => {
   previewStage();
   setScreen();
 });
+// ---------------------------------------------------------------------------
+// Gift codes
+// ---------------------------------------------------------------------------
+
+const redeemedKey = (hash) => `code:${hash.slice(0, 24)}`;
+
+function openCodes(from) {
+  audio.unlock();
+  audio.sfx("click");
+  codesReturn = from;
+  state = "codes";
+  setScreen();
+  el("code-input").value = "";
+  el("code-msg").textContent = "";
+  el("code-msg").className = "code-msg";
+  el("code-input").focus();
+}
+
+function codeMessage(text, ok) {
+  const msg = el("code-msg");
+  msg.textContent = text;
+  msg.className = "code-msg " + (ok ? "ok" : "bad");
+}
+
+async function redeemCode(raw) {
+  if (normalizeCode(raw).length < 8) return codeMessage("Enter the whole code.", false);
+  if (!globalThis.crypto || !crypto.subtle) return codeMessage("Codes need a secure (https) page.", false);
+  const hash = await hashCode(raw);
+  const reward = CODES[hash];
+  if (!reward) {
+    audio.sfx("deny");
+    return codeMessage("That code isn't valid.", false);
+  }
+  if (loadHighScore(storeKey(redeemedKey(hash)), 0) > 0) {
+    audio.sfx("deny");
+    return codeMessage("This code has already been used on this device.", false);
+  }
+  saveHighScore(storeKey(redeemedKey(hash)), 1);
+  if (reward.coins) {
+    coins += reward.coins;
+    saveHighScore(storeKey("coins"), coins);
+    codeMessage(`+${reward.coins.toLocaleString()} coins!`, true);
+  } else if (reward.unlock === "levels") {
+    saveHighScore(storeKey("unlock:levels"), 1);
+    codeMessage("All 48 levels and every world are unlocked!", true);
+  }
+  audio.sfx("buy");
+  el("code-input").value = "";
+}
+
+el("menu-code-btn").addEventListener("click", () => openCodes("menu"));
+el("garage-code-btn").addEventListener("click", () => openCodes("garage"));
+el("code-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  redeemCode(el("code-input").value);
+});
+el("code-back").addEventListener("click", () => {
+  audio.sfx("click");
+  state = codesReturn;
+  setScreen();
+});
+
 el("garage-back").addEventListener("click", () => {
   audio.sfx("click");
   state = "menu";
@@ -795,7 +867,7 @@ function update(dt) {
   time += dt;
   updateFx(fx, dt);
 
-  if (state === "menu" || state === "garage") {
+  if (state === "menu" || state === "garage" || state === "codes") {
     // Slow drift over the landscape behind the panels.
     camX += dt * 3.4;
     camY += (terrain.groundY(camX) + 2.4 - camY) * Math.min(1, dt * 3);
@@ -949,11 +1021,11 @@ function render() {
   renderer.draw({
     terrain,
     stage,
-    car: state === "menu" || state === "garage" ? null : car,
+    car: state === "menu" || state === "garage" || state === "codes" ? null : car,
     pickups,
     fx,
     time,
-    showMarkers: state !== "menu" && state !== "garage",
+    showMarkers: state !== "menu" && state !== "garage" && state !== "codes",
   });
 }
 

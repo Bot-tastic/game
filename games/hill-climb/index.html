@@ -90,6 +90,24 @@
         <button class="btn btn--ghost" id="garage-btn">🔧 Garage</button>
         <button class="btn btn--primary" id="start-btn">Start Engine</button>
       </div>
+      <button class="link-btn" id="menu-code-btn">🎁 Redeem a code</button>
+    </div>
+  </section>
+
+  <!-- ---- Gift codes ----------------------------------------------------- -->
+  <section class="overlay overlay--codes" id="codes-overlay" hidden>
+    <div class="panel">
+      <p class="eyebrow">Gift code</p>
+      <h2 class="title">Redeem</h2>
+      <form class="code-form" id="code-form" autocomplete="off">
+        <input class="code-input" id="code-input" type="text" inputmode="text" autocapitalize="characters"
+          spellcheck="false" maxlength="24" placeholder="HC-XXXX-XXXX-XXXX" aria-label="Gift code" />
+        <p class="code-msg" id="code-msg" aria-live="polite"></p>
+        <div class="actions">
+          <button class="btn btn--ghost" type="button" id="code-back">Back</button>
+          <button class="btn btn--primary" type="submit" id="code-submit">Redeem</button>
+        </div>
+      </form>
     </div>
   </section>
 
@@ -103,6 +121,7 @@
       <div class="vehicle-detail" id="vehicle-detail"></div>
       <h3 class="parts-title" id="parts-title">Upgrades</h3>
       <div class="parts" id="parts"></div>
+      <button class="link-btn" id="garage-code-btn">🎁 Redeem a code</button>
       <div class="actions">
         <button class="btn btn--ghost" id="garage-back">Back</button>
         <button class="btn btn--primary" id="garage-drive">Drive</button>
