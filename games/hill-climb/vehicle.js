@@ -12,29 +12,35 @@
 //   4. ground contact: penetration push-out, normal restitution, tyre slip
 //   5. driver torque — engine/brake on the wheels, air control on the chassis
 
+//
+// Every body dimension comes from the car's spec (vehicles.js): chassis size
+// and mass, wheel size, suspension anchors in chassis-local space (x forward,
+// y up, rear first) and the driver's head — hitting the ground with it ends
+// the run. Spring, damper and torque-reaction constants were tuned on the
+// buggy and are scaled from it by mass and inertia, so a heavier car rides
+// the same way instead of bottoming out.
+
+import { VEHICLES } from "./vehicles.js";
+
 const SUB = 6; // physics substeps per frame
-
-export const CHASSIS = { w: 2.0, h: 0.62, mass: 260 };
-export const WHEEL = { r: 0.42, mass: 32 };
-const WHEEL_I = 0.5 * WHEEL.mass * WHEEL.r * WHEEL.r;
-const INERTIA = (CHASSIS.mass * (CHASSIS.w * CHASSIS.w + 1.1 * 1.1)) / 12;
-
-// Suspension anchors in chassis-local space (x forward, y up).
-const ANCHOR = [
-  { x: -0.78, y: -0.1 }, // rear
-  { x: 0.82, y: -0.1 }, // front
-];
-const REST = 0.52;
 const MIN_LEN = 0.2;
+const REF_MASS = 260;
+const REF_INERTIA = inertiaOf(VEHICLES[0]);
 
-// The driver's head: hitting the ground with it ends the run.
-export const HEAD = { x: -0.02, y: 0.72, r: 0.2 };
+function inertiaOf(spec) {
+  const { w, h, mass } = spec.chassis;
+  return (mass * (w * w + (h + 0.48) * (h + 0.48))) / 12;
+}
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-export function createVehicle(terrain, tune, x = 6) {
-  const y = terrain.groundY(x) + REST + WHEEL.r + 0.02;
+export function createVehicle(terrain, spec, tune, x = 6) {
+  const R = spec.wheel.r;
+  const y = terrain.groundY(x) + spec.rest + R + 0.02 - spec.anchors[0].y - 0.1;
   const car = {
+    spec,
+    inertia: inertiaOf(spec),
+    wheelI: 0.5 * spec.wheel.mass * R * R,
     x,
     y,
     vx: 0,
@@ -45,9 +51,9 @@ export function createVehicle(terrain, tune, x = 6) {
     grounded: false,
     airTime: 0,
     flipTurns: 0, // signed turns completed while airborne
-    wheels: ANCHOR.map((a) => ({
+    wheels: spec.anchors.map((a) => ({
       x: x + a.x,
-      y: terrain.groundY(x + a.x) + WHEEL.r,
+      y: terrain.groundY(x + a.x) + R,
       vx: 0,
       vy: 0,
       spin: 0,
@@ -72,7 +78,7 @@ export function createVehicle(terrain, tune, x = 6) {
 function anchorOf(car, i) {
   const c = Math.cos(car.angle);
   const s = Math.sin(car.angle);
-  const a = ANCHOR[i];
+  const a = car.spec.anchors[i];
   return { x: car.x + a.x * c - a.y * s, y: car.y + a.x * s + a.y * c };
 }
 
@@ -82,15 +88,15 @@ function pointOf(car, lx, ly) {
   return { x: car.x + lx * c - ly * s, y: car.y + lx * s + ly * c };
 }
 
-export const headPoint = (car) => pointOf(car, HEAD.x, HEAD.y);
+export const headPoint = (car) => pointOf(car, car.spec.head.x, car.spec.head.y);
 
 /** Apply an impulse-like force at a world point: linear plus the torque it makes. */
 function applyImpulse(car, jx, jy, px, py) {
-  car.vx += jx / CHASSIS.mass;
-  car.vy += jy / CHASSIS.mass;
+  car.vx += jx / car.spec.chassis.mass;
+  car.vy += jy / car.spec.chassis.mass;
   const rx = px - car.x;
   const ry = py - car.y;
-  car.av += (rx * jy - ry * jx) / INERTIA;
+  car.av += (rx * jy - ry * jx) / car.inertia;
 }
 
 function applyForce(car, fx, fy, px, py, dt) {
@@ -149,8 +155,16 @@ function groundContact(terrain, px, py, r) {
 export function stepVehicle(car, terrain, stage, input, dt) {
   const h = dt / SUB;
   const tune = car.tune;
+  const spec = car.spec;
   const grip = stage.grip * tune.tires;
   const gravity = stage.gravity;
+  const WR = spec.wheel.r;
+  const WM = spec.wheel.mass;
+  const CM = spec.chassis.mass;
+  const INERTIA = car.inertia;
+  const WHEEL_I = car.wheelI;
+  const heavy = CM / REF_MASS;
+  const wheelie = 0.00035 * (REF_INERTIA / INERTIA) * spec.wheelie * clamp(gravity / 15, 0.22, 1);
 
   for (let s = 0; s < SUB; s++) {
     // --- 1. gravity + drag -------------------------------------------------
@@ -191,17 +205,17 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       const dx = w.x - an.x;
       const dy = w.y - an.y;
       let along = -(dx * upx + dy * upy); // extension downward, metres
-      const travel = REST * tune.suspension;
+      const travel = spec.rest * tune.suspension;
       const relV = -((w.vx - avx) * upx + (w.vy - avy) * upy);
       const comp = travel - along;
-      const k = 26000 / tune.suspension;
-      const c = 1150 * Math.sqrt(tune.suspension);
+      const k = (26000 * heavy) / tune.suspension;
+      const c = 1150 * heavy * Math.sqrt(tune.suspension);
       let force = k * comp - c * relV;
-      force = clamp(force, -9000, 26000);
+      force = clamp(force, -9000 * heavy, 26000 * heavy);
       w.comp = clamp(comp / travel, -0.6, 1);
       // Push the wheel down the axis, the chassis up it.
-      w.vx += (-upx * force * h) / WHEEL.mass;
-      w.vy += (-upy * force * h) / WHEEL.mass;
+      w.vx += (-upx * force * h) / WM;
+      w.vy += (-upy * force * h) / WM;
       applyForce(car, upx * force, upy * force, an.x, an.y, h);
 
       // --- 3. keep the wheel on the suspension axis ------------------------
@@ -218,10 +232,10 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       const latV = (w.vx - avx) * cosA + (w.vy - avy) * sinA;
       if (latV !== 0) {
         const cross = rx * sinA - ry * cosA;
-        const kMass = 1 / WHEEL.mass + 1 / CHASSIS.mass + (cross * cross) / INERTIA;
+        const kMass = 1 / WM + 1 / CM + (cross * cross) / INERTIA;
         const j = -latV / kMass;
-        w.vx += (cosA * j) / WHEEL.mass;
-        w.vy += (sinA * j) / WHEEL.mass;
+        w.vx += (cosA * j) / WM;
+        w.vy += (sinA * j) / WM;
         applyImpulse(car, -cosA * j, -sinA * j, an.x, an.y);
       }
       // Hard travel limits so nothing ever passes through the chassis.
@@ -237,7 +251,7 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       w.y += w.vy * h;
 
       // --- 4. ground contact ------------------------------------------------
-      const hit = groundContact(terrain, w.x, w.y, WHEEL.r);
+      const hit = groundContact(terrain, w.x, w.y, WR);
       w.onGround = !!hit;
       if (hit) {
         anyGround = true;
@@ -253,17 +267,17 @@ export function stepVehicle(car, terrain, stage, input, dt) {
         }
         // Normal load drives the friction limit; suspension force is the
         // honest source for it, floored so a fully extended wheel still bites.
-        w.load = clamp(force, 600, 20000);
+        w.load = clamp(force, 600 * heavy, 20000 * heavy);
         const tx = hit.ny;
         const ty = -hit.nx;
         const vt = w.vx * tx + w.vy * ty;
-        const slip = w.spin * WHEEL.r - vt;
+        const slip = w.spin * WR - vt;
         const maxF = grip * w.load * 1.05;
-        const ft = clamp(slip * 900, -maxF, maxF);
+        const ft = clamp(slip * 900 * heavy, -maxF, maxF);
         w.slip = clamp(slip / 6, -1, 1);
-        w.vx += (tx * ft * h) / WHEEL.mass;
-        w.vy += (ty * ft * h) / WHEEL.mass;
-        w.spin -= (ft * WHEEL.r * h) / WHEEL_I;
+        w.vx += (tx * ft * h) / WM;
+        w.vy += (ty * ft * h) / WM;
+        w.spin -= (ft * WR * h) / WHEEL_I;
       } else {
         w.load = 0;
         w.slip = 0;
@@ -274,14 +288,14 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       const share = i === 0 ? 1 - tune.awd * 0.5 : tune.awd;
       let torque = 0;
       if (input.throttle !== 0 && share > 0) {
-        const power = 2400 * tune.engine * share;
+        const power = tune.power * share;
         // Torque falls off as the wheel spins up: a crude but effective
         // stand-in for a power curve, and it caps top speed.
-        const fade = 1 / (1 + Math.abs(w.spin) / 38);
+        const fade = 1 / (1 + Math.abs(w.spin) / spec.fade);
         torque = input.throttle * power * fade;
       }
-      if (input.brake) torque -= clamp(w.spin, -1, 1) * 2600;
-      torque -= w.spin * 11; // rolling resistance + driveline drag
+      if (input.brake) torque -= clamp(w.spin, -1, 1) * 2600 * heavy * (WR / 0.42);
+      torque -= w.spin * 11 * heavy; // rolling resistance + driveline drag
       w.spin += (torque * h) / WHEEL_I;
       w.spin = clamp(w.spin, -180, 180);
       w.rot += w.spin * h;
@@ -290,14 +304,14 @@ export function stepVehicle(car, terrain, stage, input, dt) {
       // steep climb it will happily loop the car over backwards. Scaled with
       // gravity, or a low-gravity stage would backflip off its own start line.
       if (w.onGround && torque !== 0) {
-        car.av += -torque * 0.00035 * clamp(gravity / 15, 0.22, 1) * h;
+        car.av += -torque * wheelie * h;
       }
     }
 
     // Air control: the throttle axis pitches the car.
     if (!anyGround) {
-      car.av += input.throttle * 6.2 * h;
-      if (input.brake) car.av -= 4.4 * h;
+      car.av += input.throttle * spec.air * h;
+      if (input.brake) car.av -= spec.air * 0.7 * h;
     }
     car.av = clamp(car.av, -13, 13);
 
@@ -307,6 +321,7 @@ export function stepVehicle(car, terrain, stage, input, dt) {
     car.grounded = anyGround;
   }
 
+  car.throttle = input.throttle;
   car.speed = Math.hypot(car.vx, car.vy);
   car.engineRpm = Math.max(Math.abs(car.wheels[0].spin), Math.abs(car.wheels[1].spin));
   if (car.grounded) {
@@ -322,14 +337,14 @@ export function stepVehicle(car, terrain, stage, input, dt) {
 
   // Head strike ends the run.
   const head = headPoint(car);
-  if (!car.crashed && groundContact(terrain, head.x, head.y, HEAD.r)) {
+  if (!car.crashed && groundContact(terrain, head.x, head.y, car.spec.head.r)) {
     car.crashed = true;
     car.crashReason = "neck";
   }
   return car;
 }
 
-export { pointOf, anchorOf, groundContact, REST };
+export { pointOf, anchorOf, groundContact };
 
 /**
  * Did the car touch a pit's hazard? True once a wheel or the chassis dips
@@ -338,7 +353,7 @@ export { pointOf, anchorOf, groundContact, REST };
 export function hazardHit(car, terrain) {
   for (const w of car.wheels) {
     const q = terrain.hazardAt(w.x);
-    if (q && w.y - WHEEL.r * 0.6 < q.surface) return q;
+    if (q && w.y - car.spec.wheel.r * 0.6 < q.surface) return q;
   }
   const q = terrain.hazardAt(car.x);
   if (q && car.y < q.surface + 0.2) return q;

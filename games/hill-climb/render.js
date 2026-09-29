@@ -1,13 +1,13 @@
 // render.js — every pixel. A layered sky (gradient, sun or moon, stars,
 // clouds), three parallax ridges with atmospheric haze, painted ground with
-// strata, stones and grass, hazards, deterministic scenery, weather, the buggy
+// strata, stones and grass, hazards, deterministic scenery, weather, the car
 // and the FX on top.
 //
 // The camera maps world metres (y-up) to canvas pixels (y-down); world() sets
 // up that transform once per frame and everything downstream draws in metres.
 // Nothing here mutates the simulation: draw(view) takes a snapshot and paints.
 
-import { CHASSIS, WHEEL, HEAD, anchorOf } from "./vehicle.js";
+import { anchorOf } from "./vehicle.js";
 import { mulberry32 } from "./terrain.js";
 
 const rgbCache = new Map();
@@ -1176,25 +1176,33 @@ export function createRenderer(canvas) {
     });
   }
 
-  // -- the buggy -------------------------------------------------------------
+  // -- vehicles ----------------------------------------------------------------
+  //
+  // Everything is drawn in the chassis' local frame (x forward, y up) from the
+  // car's spec, so the struts, shadow and headlight follow whichever body is
+  // bolted on. Each style paints the driver first and its bodywork over the
+  // top, with translucent glass where there is a cabin.
 
-  function drawVehicle(car, theme) {
+  function drawVehicle(car, theme, t) {
+    const spec = car.spec;
+    const R = spec.wheel.r;
     world(() => {
       // Soft contact shadow, stretched along the slope under the car.
-      const gy = Math.min(car.wheels[0].y, car.wheels[1].y) - WHEEL.r;
-      const lift = Math.max(0, car.y - gy - 1.2);
+      const gy = Math.min(car.wheels[0].y, car.wheels[1].y) - R;
+      const lift = Math.max(0, car.y - gy - 1.2 - R);
       ctx.fillStyle = rgba("#000000", Math.max(0.05, 0.28 - lift * 0.04));
       ctx.beginPath();
-      ctx.ellipse(car.x, gy + 0.05, 1.5 + lift * 0.1, 0.16, Math.atan2(car.wheels[1].y - car.wheels[0].y, car.wheels[1].x - car.wheels[0].x), 0, TAU);
+      ctx.ellipse(car.x, gy + 0.05, spec.chassis.w * 0.75 + lift * 0.1, 0.16, Math.atan2(car.wheels[1].y - car.wheels[0].y, car.wheels[1].x - car.wheels[0].x), 0, TAU);
       ctx.fill();
 
       if (theme.lights) drawHeadlight(car);
 
+      const heavy = spec.look.style === "monster";
       for (let i = 0; i < 2; i++) {
         const w = car.wheels[i];
         const an = anchorOf(car, i);
         ctx.strokeStyle = "#2a2e36";
-        ctx.lineWidth = 0.14;
+        ctx.lineWidth = heavy ? 0.2 : 0.14;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(an.x, an.y);
@@ -1202,20 +1210,24 @@ export function createRenderer(canvas) {
         ctx.stroke();
         // Coil spring.
         const coils = 6;
-        ctx.strokeStyle = "#f2c230";
-        ctx.lineWidth = 0.06;
+        ctx.strokeStyle = heavy ? spec.look.trim : "#f2c230";
+        ctx.lineWidth = heavy ? 0.08 : 0.06;
         ctx.beginPath();
         for (let k = 0; k <= coils * 4; k++) {
           const f = k / (coils * 4);
-          const px = an.x + (w.x - an.x) * f * 0.8 + Math.cos(f * coils * TAU) * 0.11;
+          const px = an.x + (w.x - an.x) * f * 0.8 + Math.cos(f * coils * TAU) * (heavy ? 0.16 : 0.11);
           const py = an.y + (w.y - an.y) * f * 0.8 + Math.sin(f * coils * TAU) * 0.02;
           k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
         }
         ctx.stroke();
       }
 
-      drawBody(car);
-      for (let i = 0; i < 2; i++) drawWheel(car.wheels[i]);
+      ctx.save();
+      ctx.translate(car.x, car.y);
+      ctx.rotate(car.angle);
+      (BODIES[spec.look.style] || BODIES.buggy)(car, spec, t);
+      ctx.restore();
+      for (let i = 0; i < 2; i++) drawWheel(car.wheels[i], R, spec.look);
     });
   }
 
@@ -1223,7 +1235,7 @@ export function createRenderer(canvas) {
     ctx.save();
     ctx.translate(car.x, car.y);
     ctx.rotate(car.angle);
-    const hx = CHASSIS.w / 2 - 0.05;
+    const hx = car.spec.chassis.w / 2 - 0.05;
     const g = ctx.createLinearGradient(hx, 0, hx + 7, 0);
     g.addColorStop(0, rgba("#fff3c4", 0.42));
     g.addColorStop(1, rgba("#fff3c4", 0));
@@ -1238,165 +1250,426 @@ export function createRenderer(canvas) {
     ctx.restore();
   }
 
-  function drawBody(car) {
-    ctx.save();
-    ctx.translate(car.x, car.y);
-    ctx.rotate(car.angle);
-
-    const hw = CHASSIS.w / 2;
-    const hh = CHASSIS.h / 2;
-
-    // Roll cage behind the driver.
-    ctx.strokeStyle = "#20242c";
-    ctx.lineWidth = 0.1;
-    ctx.lineJoin = "round";
+  /** Fill a closed polygon given as flat [x0, y0, x1, y1, ...]. */
+  function poly(pts) {
     ctx.beginPath();
-    ctx.moveTo(-0.78, hh - 0.02);
-    ctx.lineTo(-0.55, hh + 0.78);
-    ctx.lineTo(0.3, hh + 0.78);
-    ctx.lineTo(0.56, hh - 0.02);
-    ctx.moveTo(-0.55, hh + 0.78);
-    ctx.lineTo(-0.1, hh);
-    ctx.stroke();
+    ctx.moveTo(pts[0], pts[1]);
+    for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+    ctx.closePath();
+  }
 
-    // Driver: torso, arm to the wheel, helmet with a visor.
-    ctx.fillStyle = "#2f5fc4";
+  /** A vertical three-stop paint gradient from the look's body colours. */
+  function paint(look, top, bottom) {
+    const g = ctx.createLinearGradient(0, top, 0, bottom);
+    g.addColorStop(0, look.body[0]);
+    g.addColorStop(0.45, look.body[1]);
+    g.addColorStop(1, look.body[2]);
+    return g;
+  }
+
+  /** Driver sitting under the helmet: torso, arm, helmet and visor. */
+  function drawDriver(car, suit = "#2f5fc4") {
+    const H = car.spec.head;
+    const seat = H.y - 0.74;
+    ctx.fillStyle = suit;
     ctx.beginPath();
-    ctx.moveTo(-0.34, hh - 0.02);
-    ctx.lineTo(0.12, hh - 0.02);
-    ctx.lineTo(0.06, hh + 0.44);
-    ctx.lineTo(-0.28, hh + 0.44);
+    ctx.moveTo(H.x - 0.32, seat);
+    ctx.lineTo(H.x + 0.14, seat);
+    ctx.lineTo(H.x + 0.08, H.y - 0.28);
+    ctx.lineTo(H.x - 0.26, H.y - 0.28);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "#2f5fc4";
+    ctx.strokeStyle = suit;
     ctx.lineWidth = 0.1;
     ctx.beginPath();
-    ctx.moveTo(-0.05, hh + 0.32);
-    ctx.lineTo(0.3, hh + 0.18);
+    ctx.moveTo(H.x - 0.03, H.y - 0.4);
+    ctx.lineTo(H.x + 0.32, H.y - 0.54);
     ctx.stroke();
-    // Steering wheel.
     ctx.strokeStyle = "#20242c";
     ctx.lineWidth = 0.05;
     ctx.beginPath();
-    ctx.moveTo(0.44, hh - 0.05);
-    ctx.lineTo(0.32, hh + 0.24);
+    ctx.moveTo(H.x + 0.46, seat - 0.03);
+    ctx.lineTo(H.x + 0.34, H.y - 0.48);
     ctx.stroke();
 
     ctx.fillStyle = "#f4c9a0";
     ctx.beginPath();
-    ctx.arc(HEAD.x, HEAD.y - 0.02, HEAD.r * 0.8, 0, TAU);
+    ctx.arc(H.x, H.y - 0.02, H.r * 0.8, 0, TAU);
     ctx.fill();
-    const hg = ctx.createRadialGradient(HEAD.x - 0.06, HEAD.y + 0.1, 0.02, HEAD.x, HEAD.y, HEAD.r * 1.1);
+    const hg = ctx.createRadialGradient(H.x - 0.06, H.y + 0.1, 0.02, H.x, H.y, H.r * 1.1);
     hg.addColorStop(0, car.crashed ? "#c9ced8" : "#ffe07a");
     hg.addColorStop(1, car.crashed ? "#7a808c" : "#f0a818");
     ctx.fillStyle = hg;
     ctx.beginPath();
-    ctx.arc(HEAD.x, HEAD.y + 0.02, HEAD.r, Math.PI * 0.02, Math.PI * 1.02);
-    ctx.lineTo(HEAD.x - HEAD.r, HEAD.y - 0.06);
+    ctx.arc(H.x, H.y + 0.02, H.r, Math.PI * 0.02, Math.PI * 1.02);
+    ctx.lineTo(H.x - H.r, H.y - 0.06);
     ctx.fill();
     ctx.fillStyle = "#1a2030";
     ctx.beginPath();
-    ctx.roundRect(HEAD.x + 0.02, HEAD.y - 0.06, 0.2, 0.1, 0.04);
+    ctx.roundRect(H.x + 0.02, H.y - 0.06, 0.2, 0.1, 0.04);
     ctx.fill();
     ctx.fillStyle = rgba("#9ad8ff", 0.7);
-    ctx.fillRect(HEAD.x + 0.08, HEAD.y - 0.01, 0.1, 0.025);
+    ctx.fillRect(H.x + 0.08, H.y - 0.01, 0.1, 0.025);
+  }
 
-    // Main tub with a lit top edge and a dark underside.
+  function numberDisc(x, y, r, text, bg, fg) {
+    ctx.fillStyle = bg;
     ctx.beginPath();
-    ctx.moveTo(-hw, -hh + 0.05);
-    ctx.lineTo(-hw + 0.08, hh * 0.6);
-    ctx.lineTo(-0.5, hh);
-    ctx.lineTo(0.42, hh);
-    ctx.lineTo(hw - 0.05, hh * 0.25);
-    ctx.lineTo(hw, -hh * 0.35);
-    ctx.lineTo(hw - 0.2, -hh);
-    ctx.lineTo(-hw + 0.15, -hh);
-    ctx.closePath();
-    const g = ctx.createLinearGradient(0, hh, 0, -hh);
-    g.addColorStop(0, "#ff7a4a");
-    g.addColorStop(0.45, "#e8402a");
-    g.addColorStop(1, "#a82414");
-    ctx.fillStyle = g;
+    ctx.arc(x, y, r, 0, TAU);
     ctx.fill();
-    ctx.lineWidth = 0.045;
-    ctx.strokeStyle = "#5e150b";
-    ctx.stroke();
-
-    // Racing stripe and number disc.
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.moveTo(-hw + 0.06, 0.02);
-    ctx.lineTo(hw - 0.02, -0.02);
-    ctx.lineTo(hw - 0.03, -0.1);
-    ctx.lineTo(-hw + 0.05, -0.06);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(-0.45, 0.02, 0.17, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = "#e8402a";
+    ctx.fillStyle = fg;
     ctx.save();
     ctx.scale(1, -1);
-    ctx.font = "900 0.24px system-ui";
+    ctx.font = `900 ${r * (text.length > 1 ? 1.15 : 1.4)}px system-ui`;
     ctx.textAlign = "center";
-    ctx.fillText("7", -0.45, 0.06);
-    ctx.restore();
-
-    // Top highlight.
-    ctx.strokeStyle = rgba("#ffffff", 0.45);
-    ctx.lineWidth = 0.035;
-    ctx.beginPath();
-    ctx.moveTo(-0.45, hh - 0.04);
-    ctx.lineTo(0.4, hh - 0.04);
-    ctx.lineTo(hw - 0.1, hh * 0.25);
-    ctx.stroke();
-
-    // Exhaust, headlight and tail light.
-    ctx.fillStyle = "#9aa0ac";
-    ctx.beginPath();
-    ctx.roundRect(-hw - 0.2, -hh + 0.1, 0.24, 0.1, 0.04);
-    ctx.fill();
-    ctx.fillStyle = "#fff6d0";
-    ctx.beginPath();
-    ctx.ellipse(hw - 0.04, 0.0, 0.05, 0.1, 0, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = "#ff3b3b";
-    ctx.fillRect(-hw - 0.01, hh * 0.1, 0.06, 0.12);
+    ctx.fillText(text, x, -y + r * 0.4);
     ctx.restore();
   }
 
-  function drawWheel(w) {
+  function lamps(hw, y, tailY) {
+    ctx.fillStyle = "#fff6d0";
+    ctx.beginPath();
+    ctx.ellipse(hw - 0.04, y, 0.05, 0.1, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "#ff3b3b";
+    ctx.fillRect(-hw - 0.01, tailY, 0.06, 0.12);
+  }
+
+  function edge(color = "#000000", a = 0.5) {
+    ctx.lineWidth = 0.045;
+    ctx.strokeStyle = rgba(color, a);
+    ctx.stroke();
+  }
+
+  function glass(alpha = 0.55) {
+    const g = ctx.createLinearGradient(0, 1.2, 0, 0);
+    g.addColorStop(0, rgba("#dff4ff", alpha));
+    g.addColorStop(1, rgba("#7ab8e0", alpha * 0.8));
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = 0.05;
+    ctx.strokeStyle = "#20242c";
+    ctx.stroke();
+  }
+
+  /** A dark arch over a wheel, so the body looks like it has wheel wells. */
+  function fender(x, y, r) {
+    ctx.strokeStyle = "#15181e";
+    ctx.lineWidth = 0.12;
+    ctx.beginPath();
+    ctx.arc(x, y, r, Math.PI * 0.05, Math.PI * 0.95);
+    ctx.stroke();
+  }
+
+  const BODIES = {
+    buggy(car, spec) {
+      const look = spec.look;
+      const hw = spec.chassis.w / 2;
+      const hh = spec.chassis.h / 2;
+      // Roll cage behind the driver.
+      ctx.strokeStyle = "#20242c";
+      ctx.lineWidth = 0.1;
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(-0.78, hh - 0.02);
+      ctx.lineTo(-0.55, hh + 0.78);
+      ctx.lineTo(0.3, hh + 0.78);
+      ctx.lineTo(0.56, hh - 0.02);
+      ctx.moveTo(-0.55, hh + 0.78);
+      ctx.lineTo(-0.1, hh);
+      ctx.stroke();
+      drawDriver(car);
+
+      poly([-hw, -hh + 0.05, -hw + 0.08, hh * 0.6, -0.5, hh, 0.42, hh, hw - 0.05, hh * 0.25, hw, -hh * 0.35, hw - 0.2, -hh, -hw + 0.15, -hh]);
+      ctx.fillStyle = paint(look, hh, -hh);
+      ctx.fill();
+      edge("#5e150b", 1);
+
+      // Racing stripe and number disc.
+      ctx.fillStyle = look.trim;
+      poly([-hw + 0.06, 0.02, hw - 0.02, -0.02, hw - 0.03, -0.1, -hw + 0.05, -0.06]);
+      ctx.fill();
+      numberDisc(-0.45, 0.02, 0.17, look.number, look.trim, look.body[1]);
+
+      ctx.strokeStyle = rgba("#ffffff", 0.45);
+      ctx.lineWidth = 0.035;
+      ctx.beginPath();
+      ctx.moveTo(-0.45, hh - 0.04);
+      ctx.lineTo(0.4, hh - 0.04);
+      ctx.lineTo(hw - 0.1, hh * 0.25);
+      ctx.stroke();
+
+      ctx.fillStyle = "#9aa0ac";
+      ctx.beginPath();
+      ctx.roundRect(-hw - 0.2, -hh + 0.1, 0.24, 0.1, 0.04);
+      ctx.fill();
+      lamps(hw, 0, hh * 0.1);
+    },
+
+    jeep(car, spec) {
+      const look = spec.look;
+      const hw = spec.chassis.w / 2;
+      const hh = spec.chassis.h / 2;
+      // Spare wheel on the tailgate.
+      ctx.fillStyle = "#15181e";
+      ctx.beginPath();
+      ctx.arc(-hw - 0.1, 0.02, 0.27, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "#6a707c";
+      ctx.beginPath();
+      ctx.arc(-hw - 0.1, 0.02, 0.12, 0, TAU);
+      ctx.fill();
+      // Rear roll hoop.
+      ctx.strokeStyle = "#20242c";
+      ctx.lineWidth = 0.1;
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(-0.72, hh);
+      ctx.lineTo(-0.66, hh + 0.72);
+      ctx.lineTo(-0.44, hh + 0.72);
+      ctx.lineTo(-0.4, hh);
+      ctx.stroke();
+      drawDriver(car, "#8a5a2e");
+
+      // Tub and bonnet: flat, square, olive.
+      poly([-hw, -hh, -hw, hh, 0.32, hh, 0.4, hh * 0.7, hw - 0.04, hh * 0.66, hw, -hh * 0.1, hw - 0.06, -hh, -hw, -hh]);
+      ctx.fillStyle = paint(look, hh, -hh);
+      ctx.fill();
+      edge(look.trim, 1);
+      // Fold-down windscreen.
+      poly([0.3, hh * 0.7, 0.42, hh * 0.72, 0.3, hh + 0.62, 0.2, hh + 0.62]);
+      glass(0.4);
+      // Grille slots and a round headlamp.
+      ctx.fillStyle = look.trim;
+      for (let k = 0; k < 4; k++) ctx.fillRect(hw - 0.1, -hh * 0.75 + k * 0.1, 0.06, 0.06);
+      ctx.fillStyle = "#fff6d0";
+      ctx.beginPath();
+      ctx.arc(hw - 0.06, hh * 0.38, 0.08, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "#ff3b3b";
+      ctx.fillRect(-hw - 0.01, hh * 0.3, 0.06, 0.14);
+      // Door line, star decal and a lit top edge.
+      ctx.strokeStyle = rgba(look.trim, 0.6);
+      ctx.lineWidth = 0.03;
+      ctx.beginPath();
+      ctx.moveTo(-0.35, hh - 0.04);
+      ctx.lineTo(-0.35, -hh + 0.1);
+      ctx.lineTo(0.3, -hh + 0.1);
+      ctx.lineTo(0.3, hh * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = rgba("#ffffff", 0.85);
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.font = "900 0.32px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText("★", 0, 0.1);
+      ctx.restore();
+      ctx.strokeStyle = rgba("#ffffff", 0.35);
+      ctx.lineWidth = 0.035;
+      ctx.beginPath();
+      ctx.moveTo(-hw + 0.05, hh - 0.03);
+      ctx.lineTo(0.3, hh - 0.03);
+      ctx.stroke();
+      for (const a of spec.anchors) fender(a.x, a.y - 0.12, spec.wheel.r + 0.1);
+    },
+
+    rally(car, spec) {
+      const look = spec.look;
+      const hw = spec.chassis.w / 2;
+      const hh = spec.chassis.h / 2;
+      const roof = hh + 0.62;
+      drawDriver(car, "#1a1f2e");
+      // Rear wing.
+      ctx.fillStyle = "#20242c";
+      ctx.fillRect(-hw + 0.1, hh, 0.06, 0.26);
+      poly([-hw - 0.12, hh + 0.24, -hw + 0.36, hh + 0.28, -hw + 0.36, hh + 0.36, -hw - 0.14, hh + 0.34]);
+      ctx.fillStyle = look.trim;
+      ctx.fill();
+      // Shell with the cabin cut into it.
+      poly([
+        -hw, -hh, -hw, hh * 0.9, -0.78, hh, -0.52, roof, 0.12, roof, 0.56, hh + 0.06,
+        hw - 0.05, hh * 0.1, hw + 0.04, -hh * 0.4, hw - 0.08, -hh, -hw, -hh,
+      ]);
+      ctx.fillStyle = paint(look, roof, -hh);
+      ctx.fill();
+      edge("#061c40", 1);
+      // Side windows over the driver.
+      poly([-0.66, hh + 0.04, -0.48, roof - 0.08, 0.1, roof - 0.08, 0.44, hh + 0.08]);
+      glass(0.5);
+      ctx.strokeStyle = "#20242c";
+      ctx.lineWidth = 0.05;
+      ctx.beginPath();
+      ctx.moveTo(-0.12, roof - 0.08);
+      ctx.lineTo(-0.1, hh + 0.06);
+      ctx.stroke();
+      // Livery: two stripes and a door number.
+      ctx.fillStyle = look.trim;
+      poly([-hw + 0.02, -0.02, hw - 0.02, -0.08, hw - 0.04, -0.16, -hw + 0.02, -0.1]);
+      ctx.fill();
+      numberDisc(-0.2, -hh * 0.45 + 0.04, 0.17, look.number, "#ffffff", look.body[2]);
+      ctx.strokeStyle = rgba("#ffffff", 0.5);
+      ctx.lineWidth = 0.035;
+      ctx.beginPath();
+      ctx.moveTo(-0.5, roof - 0.02);
+      ctx.lineTo(0.1, roof - 0.02);
+      ctx.stroke();
+      // Mud flaps and exhaust.
+      ctx.fillStyle = "#15181e";
+      for (const a of spec.anchors) ctx.fillRect(a.x - spec.wheel.r - 0.1, -hh - 0.14, 0.05, 0.18);
+      ctx.fillStyle = "#9aa0ac";
+      ctx.beginPath();
+      ctx.roundRect(-hw - 0.16, -hh + 0.06, 0.22, 0.09, 0.04);
+      ctx.fill();
+      lamps(hw, -hh * 0.05, hh * 0.3);
+      for (const a of spec.anchors) fender(a.x, a.y - 0.08, spec.wheel.r + 0.07);
+    },
+
+    monster(car, spec) {
+      const look = spec.look;
+      const hw = spec.chassis.w / 2;
+      const hh = spec.chassis.h / 2;
+      const roof = hh + 0.72;
+      // Ladder frame the suspension hangs off.
+      ctx.fillStyle = "#20242c";
+      ctx.fillRect(-hw + 0.15, -hh - 0.2, spec.chassis.w - 0.3, 0.2);
+      ctx.fillStyle = "#3a404c";
+      for (const a of spec.anchors) ctx.fillRect(a.x - 0.16, a.y - 0.05, 0.32, 0.12);
+      drawDriver(car, "#20242c");
+      // Pickup body: bed, cab, bonnet.
+      poly([
+        -hw, -hh, -hw, hh * 0.55, -0.55, hh * 0.55, -0.55, roof, 0.18, roof, 0.5, hh + 0.12,
+        hw - 0.05, hh * 0.55, hw, -hh * 0.2, hw - 0.1, -hh, -hw, -hh,
+      ]);
+      ctx.fillStyle = paint(look, roof, -hh);
+      ctx.fill();
+      edge("#200840", 1);
+      poly([-0.45, hh + 0.1, -0.45, roof - 0.1, 0.14, roof - 0.1, 0.4, hh + 0.14]);
+      glass(0.5);
+      // Flames along the flank.
+      ctx.fillStyle = look.trim;
+      ctx.beginPath();
+      ctx.moveTo(hw - 0.1, -0.05);
+      for (let k = 0; k <= 6; k++) {
+        const x = hw - 0.2 - k * 0.3;
+        ctx.quadraticCurveTo(x + 0.1, 0.16 - (k % 2) * 0.14, x - 0.05, 0.02);
+      }
+      ctx.lineTo(-hw + 0.1, -0.12);
+      ctx.lineTo(hw - 0.15, -0.2);
+      ctx.closePath();
+      ctx.fill();
+      // Roof light bar and bull bar.
+      ctx.fillStyle = "#20242c";
+      ctx.fillRect(-0.45, roof, 0.6, 0.08);
+      ctx.fillStyle = "#fff6d0";
+      for (let k = 0; k < 4; k++) ctx.fillRect(-0.4 + k * 0.14, roof + 0.02, 0.08, 0.05);
+      ctx.strokeStyle = "#9aa0ac";
+      ctx.lineWidth = 0.07;
+      ctx.beginPath();
+      ctx.moveTo(hw - 0.04, hh * 0.3);
+      ctx.lineTo(hw + 0.14, hh * 0.2);
+      ctx.lineTo(hw + 0.14, -hh * 0.8);
+      ctx.lineTo(hw - 0.06, -hh * 0.9);
+      ctx.stroke();
+      lamps(hw, hh * 0.1, hh * 0.1);
+      // Twin stacks behind the cab.
+      ctx.fillStyle = "#b8c0cc";
+      ctx.fillRect(-0.7, hh * 0.55, 0.08, 0.6);
+      ctx.fillRect(-0.84, hh * 0.55, 0.08, 0.5);
+    },
+
+    rocket(car, spec, t) {
+      const look = spec.look;
+      const hw = spec.chassis.w / 2;
+      const hh = spec.chassis.h / 2;
+      // Exhaust flame, only with the throttle down.
+      const burn = Math.max(0, car.throttle || 0);
+      if (burn > 0 && !car.crashed) {
+        const len = 0.6 + burn * 0.9 + Math.sin(t * 60) * 0.15;
+        const g = ctx.createLinearGradient(-hw, 0, -hw - len, 0);
+        g.addColorStop(0, rgba("#ffffff", 0.95));
+        g.addColorStop(0.3, rgba("#5ec8ff", 0.9));
+        g.addColorStop(1, rgba("#a06bff", 0));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(-hw + 0.05, 0.14);
+        ctx.quadraticCurveTo(-hw - len * 0.6, 0.2, -hw - len, 0.02);
+        ctx.quadraticCurveTo(-hw - len * 0.6, -0.16, -hw + 0.05, -0.1);
+        ctx.fill();
+      }
+      // Tail fin.
+      poly([-hw + 0.05, hh, -hw - 0.08, hh + 0.6, -hw + 0.22, hh + 0.6, -hw + 0.55, hh]);
+      ctx.fillStyle = look.trim;
+      ctx.fill();
+      edge();
+      drawDriver(car, "#20242c");
+      // Wedge body: flat tail, long pointed nose.
+      poly([-hw, -hh * 0.6, -hw, hh, -0.1, hh + 0.1, 0.5, hh * 0.7, hw + 0.2, -hh * 0.2, hw - 0.1, -hh, -hw + 0.1, -hh]);
+      ctx.fillStyle = paint(look, hh, -hh);
+      ctx.fill();
+      edge("#20242c", 0.9);
+      // Bubble canopy.
+      ctx.beginPath();
+      ctx.ellipse(spec.head.x + 0.05, hh + 0.05, 0.52, 0.5, 0, 0, Math.PI);
+      ctx.closePath();
+      glass(0.4);
+      // Accent stripe, intake and nozzle.
+      ctx.fillStyle = look.trim;
+      poly([-hw, -0.02, hw + 0.05, -0.12, hw - 0.02, -0.2, -hw, -0.1]);
+      ctx.fill();
+      ctx.fillStyle = "#20242c";
+      poly([0.25, -hh * 0.2, 0.7, -hh * 0.35, 0.7, -hh * 0.6, 0.3, -hh * 0.6]);
+      ctx.fill();
+      ctx.fillStyle = "#5a6270";
+      ctx.beginPath();
+      ctx.roundRect(-hw - 0.1, -0.12, 0.16, 0.28, 0.05);
+      ctx.fill();
+      ctx.strokeStyle = rgba("#ffffff", 0.6);
+      ctx.lineWidth = 0.035;
+      ctx.beginPath();
+      ctx.moveTo(0.5, hh * 0.66);
+      ctx.lineTo(hw + 0.1, -hh * 0.2);
+      ctx.stroke();
+      ctx.fillStyle = "#9ad8ff";
+      ctx.beginPath();
+      ctx.ellipse(hw - 0.05, -hh * 0.35, 0.09, 0.04, -0.3, 0, TAU);
+      ctx.fill();
+    },
+  };
+
+  function drawWheel(w, R, look) {
     ctx.save();
     ctx.translate(w.x, w.y);
+    const chunky = look.style === "monster" || look.style === "jeep";
     // Tyre with a subtle radial shade.
-    const g = ctx.createRadialGradient(0, 0, WHEEL.r * 0.5, 0, 0, WHEEL.r);
+    const g = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R);
     g.addColorStop(0, "#2a2e38");
     g.addColorStop(1, "#0e1016");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(0, 0, WHEEL.r, 0, TAU);
+    ctx.arc(0, 0, R, 0, TAU);
     ctx.fill();
     ctx.rotate(w.rot);
     const blur = Math.min(1, Math.abs(w.spin) / 60);
     // Tread blocks, fading into a blur at speed.
+    const n = chunky ? 14 : 12;
     ctx.lineCap = "butt";
     ctx.strokeStyle = rgba("#3a404e", 1 - blur * 0.7);
-    ctx.lineWidth = 0.08;
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * TAU;
+    ctx.lineWidth = chunky ? R * 0.28 : 0.08;
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU;
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * (WHEEL.r - 0.1), Math.sin(a) * (WHEEL.r - 0.1));
-      ctx.lineTo(Math.cos(a) * (WHEEL.r - 0.02), Math.sin(a) * (WHEEL.r - 0.02));
+      ctx.moveTo(Math.cos(a) * (R * (chunky ? 0.8 : 0.76)), Math.sin(a) * (R * (chunky ? 0.8 : 0.76)));
+      ctx.lineTo(Math.cos(a) * (R - 0.02), Math.sin(a) * (R - 0.02));
       ctx.stroke();
     }
     // Rim.
-    const rg = ctx.createRadialGradient(-0.05, 0.05, 0.02, 0, 0, WHEEL.r * 0.5);
+    const rim = R * (chunky ? 0.55 : 0.5);
+    const rg = ctx.createRadialGradient(-0.05, 0.05, 0.02, 0, 0, rim);
     rg.addColorStop(0, "#f4f6fa");
     rg.addColorStop(1, "#9aa0ac");
     ctx.fillStyle = rg;
     ctx.beginPath();
-    ctx.arc(0, 0, WHEEL.r * 0.5, 0, TAU);
+    ctx.arc(0, 0, rim, 0, TAU);
     ctx.fill();
     ctx.strokeStyle = rgba("#5a606c", 1 - blur * 0.8);
     ctx.lineWidth = 0.055;
@@ -1404,19 +1677,19 @@ export function createRenderer(canvas) {
       const a = (k / 5) * TAU;
       ctx.beginPath();
       ctx.moveTo(Math.cos(a) * 0.05, Math.sin(a) * 0.05);
-      ctx.lineTo(Math.cos(a) * WHEEL.r * 0.46, Math.sin(a) * WHEEL.r * 0.46);
+      ctx.lineTo(Math.cos(a) * rim * 0.92, Math.sin(a) * rim * 0.92);
       ctx.stroke();
     }
     if (blur > 0.3) {
       ctx.strokeStyle = rgba("#c9ced8", (blur - 0.3) * 0.5);
       ctx.lineWidth = 0.04;
       ctx.beginPath();
-      ctx.arc(0, 0, WHEEL.r * 0.32, 0, TAU);
+      ctx.arc(0, 0, rim * 0.64, 0, TAU);
       ctx.stroke();
     }
-    ctx.fillStyle = "#e8402a";
+    ctx.fillStyle = look.hub;
     ctx.beginPath();
-    ctx.arc(0, 0, 0.055, 0, TAU);
+    ctx.arc(0, 0, R * 0.13, 0, TAU);
     ctx.fill();
     ctx.restore();
   }
@@ -1596,7 +1869,7 @@ export function createRenderer(canvas) {
       if (showMarkers) drawMarkers(terrain, theme);
       drawFinish(terrain, theme, time);
       drawPickups(pickups, time);
-      if (car) drawVehicle(car, theme);
+      if (car) drawVehicle(car, theme, time);
       drawFx(fx);
       drawWeather(theme, dt, time, car ? car.vx * (scale / 42) * 0.12 : 0.3);
       ctx.restore();

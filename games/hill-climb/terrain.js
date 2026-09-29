@@ -61,6 +61,7 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
   }
 
   // --- level features ---------------------------------------------------
+  const maxUp = level ? level.maxUp : Infinity;
   const feats = level ? level.features : [];
   const additive = feats.filter((f) => f.type !== "pit");
 
@@ -74,6 +75,17 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
       } else if (f.type === "bumps") {
         const d = x - (f.x - f.len / 2);
         if (d > 0 && d < f.len) h += Math.sin((d / f.len) * Math.PI) * f.a * (1 - Math.cos(d * 1.9));
+      } else if (f.type === "climb") {
+        // A trapezoid: steep enough that the slope limit below shapes its
+        // face into a straight ramp at exactly the level's maxUp, then a flat
+        // top and a gentler way down.
+        const up = f.h / Math.min(1.2, maxUp);
+        const d = x - f.x;
+        if (d > -up && d < f.top + f.h / 0.5) {
+          if (d <= 0) h += f.h * (1 + d / up);
+          else if (d <= f.top) h += f.h;
+          else h += f.h * (1 - (d - f.top) / (f.h / 0.5));
+        }
       } else if (f.type === "drop" && x < f.x && x > f.x - 14) {
         // A short flat lip before the ledge (the fall itself is in dropAt).
         h += (hillsAt(f.x) - hillsAt(x)) * smoothstep((x - (f.x - 14)) / 14);
@@ -92,10 +104,9 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
   }
 
   // A level's base ground is precomputed and slope-limited: no sustained
-  // climb may be steeper than the world's grip can drive up (kickers, added
+  // climb may be steeper than the level allows (kickers, added
   // later, are short enough to carry momentum over), and no descent so steep
   // that the valley at its foot folds the car in half. Ledges are added after.
-  const maxUp = level ? (0.12 + 0.3 * stage.grip) * (0.92 + 0.16 * (level.index / 5)) : Infinity;
   const maxDown = 0.72;
   let baseAt = shapedAt;
   if (level) {
@@ -104,6 +115,16 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
     base[0] = shapedAt(0);
     for (let i = 1; i <= n; i++) base[i] = Math.min(shapedAt(i * STEP), base[i - 1] + maxUp * STEP);
     for (let i = n - 1; i >= 0; i--) base[i] = Math.min(base[i], base[i + 1] + maxDown * STEP);
+    // Round every crest and valley: a steep descent straight into a steep
+    // climb is a V the chassis folds into, and no amount of upgrades helps.
+    for (let pass = 0; pass < 3; pass++) {
+      const src = base.slice();
+      for (let i = 3; i <= n - 3; i++) {
+        let sum = 0;
+        for (let k = -3; k <= 3; k++) sum += src[i + k];
+        base[i] = sum / 7;
+      }
+    }
     for (let i = 0; i <= n; i++) base[i] += dropAt(i * STEP);
     baseAt = (x) => {
       const s = Math.max(0, Math.min(n - 1e-9, x / STEP));
@@ -140,7 +161,7 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
     // ramp onto and off it is never steeper than the world allows.
     const blendLen = (edge, y, dir) => {
       let d = BLEND;
-      while (d < 70 && Math.abs(y - baseAt(edge + dir * d)) > d * maxUp * 0.6) d += 2;
+      while (d < 90 && Math.abs(y - baseAt(edge + dir * d)) > d * Math.min(maxUp, 0.6) * 0.6) d += 2;
       return d;
     };
     pits.push({
@@ -184,6 +205,7 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
   const busy = [
     ...pits.map((q) => [q.a - q.ba, q.b + q.bb]),
     ...additive.map((f) => {
+      if (f.type === "climb") return [f.x - f.h / Math.min(1.2, maxUp) - 8, f.x + f.top + 6];
       const r = f.type === "hill" ? f.w / 2 : f.type === "bumps" ? f.len / 2 : 16;
       return [f.x - r - 6, f.x + r + 6];
     }),
@@ -214,6 +236,10 @@ export function createTerrain(stage, seed = (Math.random() * 1e9) | 0, level = n
     // On a level a kicker must be takeable from a standing start after a
     // retry, so it is lower and never steeper than about 45 degrees.
     if (level) {
+      // ...and never throws the car into a hillside or off a cliff: skip it
+      // when the landing zone climbs or falls away steeply.
+      const fall = baseAt(x + 25) - baseAt(x);
+      if (fall > 25 * 0.25 || fall < -25 * 0.3 || under < -0.3) continue;
       h *= 0.62 + 0.25 * (level.index / 5);
       ramps.push({ x, up: Math.max(up, h * 1.7), down: 1.6 + rampRnd() * 2.2, h });
       continue;

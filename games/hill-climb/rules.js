@@ -5,7 +5,7 @@ export const FUEL = {
   max: 100,
   idle: 0.8, // units/second just for running
   gas: 1.9, // extra units/second at full throttle
-  pickup: 42,
+  pickup: 0.36, // share of the tank a can refills, so a bigger tank refills more
 };
 
 export const COIN_VALUE = 10;
