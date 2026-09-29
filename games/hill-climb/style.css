@@ -1145,3 +1145,64 @@
     font-size: 30px;
   }
 }
+
+/* ---- gift codes ---- */
+.link-btn {
+  margin-top: 2px;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: var(--fg-1);
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: #ffd166;
+}
+
+.code-form {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+
+.code-input {
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--fg-0);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.code-input:focus {
+  outline: none;
+  border-color: #ffd166;
+  box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.2);
+}
+
+.code-msg {
+  min-height: 1.3em;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+
+.code-msg.ok {
+  color: var(--hc-grass);
+}
+
+.code-msg.bad {
+  color: #ff5d8f;
+}
