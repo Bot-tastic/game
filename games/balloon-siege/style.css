@@ -905,3 +905,63 @@ body.wide .shop { grid-template-columns: 1fr 1fr; }
   .shop-item .si-icon { width: 34px; height: 34px; font-size: 20px; }
   .logo { flex-direction: row; gap: 10px; }
 }
+
+/* ---- Pause button, saved game, mode picker ---- */
+.hud-left { display: flex; gap: 6px; align-items: center; }
+
+.pause-btn {
+  appearance: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--bs-line);
+  background: linear-gradient(180deg, #3a2c7a, #241a52);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+.pause-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35); }
+
+.continue-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 10px 10px 16px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 3px solid #ffd166;
+  box-shadow: 0 5px 0 #c9971f;
+  text-align: left;
+}
+
+.continue-box[hidden] { display: none; }
+.continue-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.continue-text strong { font-family: var(--bs-display); font-weight: 400; font-size: 18px; color: #1a1238; }
+.continue-text span { font-size: 12px; font-weight: 700; color: #5a5280; }
+.continue-box .btn { flex: 0 0 auto; font-size: 20px; min-height: 48px; }
+
+.mode-card--endless.selected { background: #9b6bff; border-color: #6a3fd0; box-shadow: 0 5px 0 #6a3fd0; }
+.mode-card:not(.mode-card--endless).selected { background: #ffa31a; border-color: #b86a00; box-shadow: 0 5px 0 #b86a00; }
+
+.actions--stack { flex-direction: column; align-items: stretch; min-width: 240px; }
+
+.btn--save {
+  font-family: var(--bs-display);
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffd166, #ffa31a);
+  color: #3a2200;
+  box-shadow: 0 5px 0 #b86a00;
+}
+
+.btn--save:active { transform: translateY(4px); box-shadow: 0 1px 0 #b86a00; }
+
+@media (max-width: 480px) {
+  .pause-btn { width: 36px; height: 36px; font-size: 13px; }
+  .continue-box { flex-direction: column; align-items: stretch; }
+}

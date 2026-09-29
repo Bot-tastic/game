@@ -18,7 +18,10 @@
       <canvas id="game"></canvas>
 
       <header class="topbar safe-area" id="topbar-row">
-        <a class="hud-back" href="../../index.html">&larr; Games</a>
+        <div class="hud-left">
+          <a class="hud-back" href="../../index.html">&larr; Games</a>
+          <button class="pause-btn" id="pause-btn" type="button" aria-label="Pause">⏸</button>
+        </div>
         <div class="stats">
           <div class="stat-chip stat-chip--hero" id="hero-chip" hidden>
             <span class="k">🐒</span><span class="v" id="hero-level">1</span>
@@ -98,11 +101,22 @@
       <h1 class="logo"><span class="l1">Balloon</span><span class="l2">Siege</span></h1>
       <p class="tagline">Build the gauntlet. Level your hero. Pop everything.</p>
 
+      <div class="continue-box" id="continue-box" hidden>
+        <div class="continue-text">
+          <strong>Saved game</strong>
+          <span id="continue-sub"></span>
+        </div>
+        <button class="btn btn--primary" id="continue-btn" type="button">Continue</button>
+      </div>
+
       <h2 class="section-label">Map</h2>
       <div class="map-grid" id="map-grid"></div>
 
       <h2 class="section-label">Difficulty</h2>
       <div class="diff-row" id="diff-row"></div>
+
+      <h2 class="section-label">Mode</h2>
+      <div class="diff-row" id="mode-row"></div>
 
       <button class="btn btn--primary btn--wide" id="play-btn">Play</button>
       <p class="best-line" id="best-line"></p>
@@ -114,9 +128,10 @@
   <section class="overlay overlay--card" id="pause-overlay" hidden>
     <h2>Paused</h2>
     <p class="stat">Round <strong id="pause-round">1</strong></p>
-    <div class="actions">
+    <div class="actions actions--stack">
       <button class="btn btn--primary" id="resume-btn">Resume</button>
-      <button class="btn btn--ghost" id="quit-btn">Quit to menu</button>
+      <button class="btn btn--save" id="save-btn">Save &amp; exit</button>
+      <button class="btn btn--ghost" id="quit-btn">Abandon run</button>
     </div>
   </section>
 
