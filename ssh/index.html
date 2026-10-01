@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <title>SSH</title>
+  <link rel="stylesheet" href="../shared/theme.css" />
+  <link rel="stylesheet" href="../shared/components.css" />
+  <link rel="stylesheet" href="vendor/xterm.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main id="setup" class="setup">
+    <h1>SSH</h1>
+    <p class="muted">Encryption and login happen in this tab. The local bridge only relays encrypted bytes; nothing is sent to GitHub.</p>
+
+    <form id="connect-form" autocomplete="off">
+      <fieldset>
+        <legend>Server</legend>
+        <div class="row">
+          <label class="grow">Host <input name="host" required spellcheck="false" autocapitalize="off" placeholder="example.com" /></label>
+          <label class="narrow">Port <input name="port" type="number" min="1" max="65535" value="22" required /></label>
+        </div>
+        <label>Username <input name="username" required spellcheck="false" autocapitalize="off" /></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Login</legend>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="auth" value="password" checked /> Password</label>
+          <label><input type="radio" name="auth" value="key" /> Private key</label>
+          <label><input type="radio" name="auth" value="interactive" /> Prompts / 2FA</label>
+        </div>
+        <label data-auth="password">Password <input name="password" type="password" autocomplete="off" /></label>
+        <div data-auth="key" hidden>
+          <label>Key file <input name="keyfile" type="file" /></label>
+          <label>…or paste key <textarea name="keytext" rows="4" spellcheck="false" placeholder="-----BEGIN ENCRYPTED PRIVATE KEY-----"></textarea></label>
+          <label>Passphrase <input name="passphrase" type="password" autocomplete="off" /></label>
+          <p class="muted small">RSA or ECDSA keys in PKCS#8 format (passphrase-protected is fine). Convert a copy of an existing key with <code>ssh-keygen -p -m PKCS8 -f copy_of_key</code>. Ed25519 keys are not supported.</p>
+        </div>
+        <p data-auth="interactive" class="muted small" hidden>The server's questions (password, one-time code…) will be asked one by one.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Local bridge</legend>
+        <div class="row">
+          <label class="narrow">Port <input name="bridgePort" type="number" min="1" max="65535" value="8022" required /></label>
+          <label class="grow">Token <input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
+        </div>
+        <details>
+          <summary>How do I start the bridge?</summary>
+          <p>Browsers can't open SSH connections directly, so a tiny relay runs on your own computer (it only listens on 127.0.0.1). Download <a href="bridge.py" download>bridge.py</a> and run:</p>
+          <pre>python3 bridge.py</pre>
+          <p>It prints a link that fills in the port and token for you. Restrict targets with <code>--allow host:22</code>.</p>
+          <p class="small muted">Chrome may ask to allow access to devices on your local network. Safari blocks connections from https pages to localhost; use Chrome or Firefox.</p>
+        </details>
+      </fieldset>
+
+      <label class="check"><input type="checkbox" name="remember" /> Remember host, port and username on this device (never passwords or keys)</label>
+
+      <div class="actions">
+        <button class="btn btn--primary" type="submit">Connect</button>
+        <button class="btn btn--ghost" type="button" id="known-hosts-btn">Known hosts</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </form>
+  </main>
+
+  <section id="session" class="session" hidden>
+    <header class="bar">
+      <span id="session-title" class="title"></span>
+      <button class="btn btn--ghost" type="button" id="disconnect">Disconnect</button>
+    </header>
+    <div id="terminal" class="terminal"></div>
+  </section>
+
+  <dialog id="dialog">
+    <form method="dialog" id="dialog-form">
+      <h2 id="dialog-title"></h2>
+      <div id="dialog-body"></div>
+      <div class="actions" id="dialog-actions"></div>
+    </form>
+  </dialog>
+</body>
+</html>
