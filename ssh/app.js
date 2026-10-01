@@ -62,20 +62,25 @@ function init() {
     return;
   }
 
-  // The bridge prints a link with the port and token in the URL fragment, which
-  // browsers never send to the server. Read it, then drop it from the address bar.
-  const hash = new URLSearchParams(location.hash.slice(1));
-  if (hash.has('token')) form.token.value = hash.get('token');
-  if (hash.has('bridge')) form.bridgePort.value = hash.get('bridge');
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
-
   const profile = readJson(PROFILE_KEY);
   if (profile) {
-    form.host.value = profile.host || '';
+    form.host.value = profile.host || 'localhost';
     form.port.value = profile.port || 22;
     form.username.value = profile.username || '';
+    form.bridge.value = profile.bridge || '';
+    form.token.value = profile.token || '';
     form.remember.checked = true;
   }
+
+  // bridge.py prints a link with the relay address and token in the URL fragment,
+  // which browsers never send to the server. Read it, then drop it from the address bar.
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.has('token')) form.token.value = hash.get('token');
+  if (hash.has('bridge')) {
+    const b = hash.get('bridge');
+    form.bridge.value = /^\d+$/.test(b) ? `ws://127.0.0.1:${b}` : b;
+  }
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 
   form.addEventListener('change', (e) => {
     if (e.target.name === 'auth') syncAuthFields();
@@ -89,6 +94,8 @@ function init() {
   $('#disconnect').addEventListener('click', () => disconnect('Disconnected.'));
   $('#known-hosts-btn').addEventListener('click', showKnownHosts);
   window.addEventListener('pagehide', () => disconnect());
+  setupKeybar();
+  setupViewport();
 }
 
 function syncAuthFields() {
@@ -101,12 +108,13 @@ async function connect() {
   const host = form.host.value.trim();
   const port = Number(form.port.value);
   const username = form.username.value.trim();
-  const bridgePort = Number(form.bridgePort.value);
+  const bridge = form.bridge.value.trim();
   const token = form.token.value.trim();
   const mode = form.auth.value;
+  const relay = parseRelay(bridge);
 
   if (form.remember.checked) {
-    writeJson(PROFILE_KEY, { host, port, username });
+    writeJson(PROFILE_KEY, { host, port, username, bridge, token });
   } else {
     removeKey(PROFILE_KEY);
   }
@@ -138,19 +146,19 @@ async function connect() {
   form.keyfile.value = '';
 
   setBusy(true);
-  setStatus(`Connecting to ${host}:${port} via local bridge…`);
+  setStatus(`Connecting to ${host}:${port} via ${relay.host}…`);
 
   const conn = { closed: false };
   active = conn;
   try {
-    const url = `ws://127.0.0.1:${bridgePort}/?` + new URLSearchParams({ token, host, port: String(port) });
-    conn.ws = await openWebSocket(url);
+    relay.search = new URLSearchParams({ token, host, port: String(port) }).toString();
+    conn.ws = await openWebSocket(relay.href);
 
     const config = new ssh.SshSessionConfiguration();
     conn.session = new ssh.SshClientSession(config);
     conn.session.onAuthenticating((e) => {
       if (e.authenticationType === ssh.SshAuthenticationType.serverPublicKey) {
-        e.authenticationPromise = verifyHostKey(host, port, e.publicKey);
+        e.authenticationPromise = verifyHostKey(relay.host, host, port, e.publicKey);
       } else if (e.authenticationType === ssh.SshAuthenticationType.clientInteractive && e.infoRequest) {
         e.authenticationPromise = answerPrompts(e);
       }
@@ -178,6 +186,7 @@ async function connect() {
 async function startShell(conn, title) {
   $('#setup').hidden = true;
   $('#session').hidden = false;
+  document.body.classList.add('in-session');
   $('#session-title').textContent = title;
 
   const term = new Terminal({
@@ -190,6 +199,10 @@ async function startShell(conn, title) {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open($('#terminal'));
+  // Stop iOS from "fixing" what you type into the shell.
+  for (const [k, v] of [['autocorrect', 'off'], ['autocapitalize', 'off'], ['autocomplete', 'off'], ['spellcheck', 'false']]) {
+    term.textarea?.setAttribute(k, v);
+  }
   fit.fit();
   conn.term = term;
 
@@ -214,12 +227,95 @@ async function startShell(conn, title) {
     throw new Error('Server refused to start a shell.');
   }
 
-  term.onData((d) => channel.send(Buffer.from(d, 'utf8')).catch(() => {}));
+  conn.send = (d) => channel.send(Buffer.from(d, 'utf8')).catch(() => {});
+  term.onData((d) => conn.send(applyModifiers(d)));
   term.onBinary((d) => channel.send(Buffer.from(d, 'binary')).catch(() => {}));
   term.onResize(({ cols, rows }) => channel.request(new WindowChangeMessage(cols, rows)).catch(() => {}));
   conn.resizeObserver = new ResizeObserver(() => fit.fit());
   conn.resizeObserver.observe($('#terminal'));
   term.focus();
+}
+
+// ---- on-screen keys for touch keyboards that lack Esc, Ctrl, Tab and arrows ----
+
+const modifiers = { ctrl: false, alt: false };
+
+function setupKeybar() {
+  const bar = $('#keybar');
+  const press = (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || !active?.send) return;
+    // Keep focus (and the iPad keyboard) on the terminal.
+    e.preventDefault();
+    keybarAction(btn);
+    if (e.type === 'mousedown') active.term.focus();
+  };
+  bar.addEventListener('touchstart', press, { passive: false });
+  bar.addEventListener('mousedown', press);
+}
+
+function keybarAction(btn) {
+  const conn = active;
+  const key = btn.dataset.key;
+  if (btn.dataset.text) {
+    conn.send(applyModifiers(btn.dataset.text));
+    return;
+  }
+  if (key === 'ctrl' || key === 'alt') {
+    modifiers[key] = !modifiers[key];
+    syncModifierButtons();
+    return;
+  }
+  if (key === 'paste') {
+    navigator.clipboard?.readText().then((text) => text && conn.term.paste(text)).catch(() => {});
+    return;
+  }
+  const appCursor = conn.term.modes.applicationCursorKeysMode;
+  const arrow = (c) => (appCursor ? '\x1bO' : '\x1b[') + c;
+  const seq = { esc: '\x1b', tab: '\t', up: arrow('A'), down: arrow('B'), right: arrow('C'), left: arrow('D') }[key];
+  if (seq) conn.send((modifiers.alt ? '\x1b' : '') + seq);
+  clearModifiers();
+}
+
+function applyModifiers(data) {
+  if (!modifiers.ctrl && !modifiers.alt) return data;
+  let out = data;
+  if (modifiers.ctrl && data.length === 1) {
+    const c = data.toUpperCase();
+    const code = c.charCodeAt(0);
+    if (code >= 64 && code <= 95) out = String.fromCharCode(code - 64); // @, A-Z, [ \ ] ^ _
+    else if (c === ' ') out = '\x00';
+    else if (c === '?') out = '\x7f';
+  }
+  if (modifiers.alt) out = '\x1b' + out;
+  clearModifiers();
+  return out;
+}
+
+function clearModifiers() {
+  modifiers.ctrl = modifiers.alt = false;
+  syncModifierButtons();
+}
+
+function syncModifierButtons() {
+  for (const name of ['ctrl', 'alt']) {
+    $(`#keybar [data-key=${name}]`).setAttribute('aria-pressed', String(modifiers[name]));
+  }
+}
+
+// On iPad the on-screen keyboard covers the page instead of resizing it, so size
+// the terminal to the visible area.
+function setupViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const layout = () => {
+    const session = $('#session');
+    session.style.height = `${vv.height}px`;
+    session.style.transform = `translateY(${vv.offsetTop}px)`;
+  };
+  vv.addEventListener('resize', layout);
+  vv.addEventListener('scroll', layout);
+  layout();
 }
 
 function disconnect(message) {
@@ -230,9 +326,28 @@ function disconnect(message) {
   try { conn.session?.dispose(); } catch {}
   try { conn.ws?.close(); } catch {}
   conn.term?.dispose();
+  clearModifiers();
+  document.body.classList.remove('in-session');
   $('#session').hidden = true;
   $('#setup').hidden = false;
   if (message) setStatus(message);
+}
+
+function parseRelay(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Enter the relay address bridge.py printed, e.g. wss://something.trycloudflare.com');
+  }
+  const local = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+  if (url.protocol === 'https:') url.protocol = 'wss:';
+  if (url.protocol === 'http:' && local) url.protocol = 'ws:';
+  if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && local)) {
+    throw new Error('The relay address must start with wss:// (an encrypted connection).');
+  }
+  url.hash = '';
+  return url;
 }
 
 function openWebSocket(url) {
@@ -250,9 +365,11 @@ function openWebSocket(url) {
       resolve(ws);
     };
     ws.onerror = () => {
+      const local = url.startsWith('ws:');
       reject(new Error(
-        'Could not reach the local bridge. Is bridge.py running, and are the port and token right? ' +
-        'It also refuses SSH targets outside its --allow list.'
+        'Could not reach the relay. Is bridge.py (and its tunnel) still running, and are the address and token right? ' +
+        'It also refuses SSH targets outside its --allow list (default: localhost:22).' +
+        (local ? ' Safari cannot use a ws:// relay on this device; use the wss:// address instead.' : '')
       ));
     };
   });
@@ -260,12 +377,13 @@ function openWebSocket(url) {
 
 // ---- Host key verification (trust on first use, like ~/.ssh/known_hosts) ----
 
-async function verifyHostKey(host, port, publicKey) {
+async function verifyHostKey(relayHost, host, port, publicKey) {
   const bytes = await publicKey.getPublicKeyBytes();
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   const fingerprint = 'SHA256:' + btoa(String.fromCharCode(...digest)).replace(/=+$/, '');
   const algorithm = publicKey.keyAlgorithmName;
-  const id = `${host.toLowerCase()}:${port}`;
+  // "localhost:22" behind two different relays is two different servers.
+  const id = `${relayHost} → ${host.toLowerCase()}:${port}`;
   const known = readJson(KNOWN_HOSTS_KEY) || {};
   const saved = known[id];
 
@@ -288,7 +406,7 @@ async function verifyHostKey(host, port, publicKey) {
   const choice = await ask(
     'New server',
     [
-      para(`First connection to ${id}. Check that this ${algorithm} fingerprint matches the server (ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub):`),
+      para(`First connection to ${host}:${port} via ${relayHost}. Check that this ${algorithm} fingerprint matches the server (ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub):`),
       code(fingerprint),
     ],
     [

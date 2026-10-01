@@ -2,10 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
   <meta name="referrer" content="no-referrer" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="SSH" />
+  <meta name="format-detection" content="telephone=no" />
   <title>SSH</title>
   <link rel="stylesheet" href="../shared/theme.css" />
   <link rel="stylesheet" href="../shared/components.css" />
@@ -16,16 +21,17 @@
 <body>
   <main id="setup" class="setup">
     <h1>SSH</h1>
-    <p class="muted">Encryption and login happen in this tab. The local bridge only relays encrypted bytes; nothing is sent to GitHub.</p>
+    <p class="muted">Encryption and login happen in this tab. The relay only passes encrypted bytes along; nothing is sent to GitHub.</p>
 
     <form id="connect-form" autocomplete="off">
       <fieldset>
         <legend>Server</legend>
         <div class="row">
-          <label class="grow">Host <input name="host" required spellcheck="false" autocapitalize="off" placeholder="example.com" /></label>
-          <label class="narrow">Port <input name="port" type="number" min="1" max="65535" value="22" required /></label>
+          <label class="grow">Host <input name="host" required spellcheck="false" autocapitalize="off" autocorrect="off" value="localhost" /></label>
+          <label class="narrow">Port <input name="port" type="number" inputmode="numeric" min="1" max="65535" value="22" required /></label>
         </div>
-        <label>Username <input name="username" required spellcheck="false" autocapitalize="off" /></label>
+        <p class="muted small">As seen from the relay. If the relay runs on the server itself, keep <code>localhost</code>.</p>
+        <label>Username <input name="username" required spellcheck="false" autocapitalize="off" autocorrect="off" /></label>
       </fieldset>
 
       <fieldset>
@@ -38,7 +44,7 @@
         <label data-auth="password">Password <input name="password" type="password" autocomplete="off" /></label>
         <div data-auth="key" hidden>
           <label>Key file <input name="keyfile" type="file" /></label>
-          <label>…or paste key <textarea name="keytext" rows="4" spellcheck="false" placeholder="-----BEGIN ENCRYPTED PRIVATE KEY-----"></textarea></label>
+          <label>…or paste key <textarea name="keytext" rows="4" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="-----BEGIN ENCRYPTED PRIVATE KEY-----"></textarea></label>
           <label>Passphrase <input name="passphrase" type="password" autocomplete="off" /></label>
           <p class="muted small">RSA or ECDSA keys in PKCS#8 format (passphrase-protected is fine). Convert a copy of an existing key with <code>ssh-keygen -p -m PKCS8 -f copy_of_key</code>. Ed25519 keys are not supported.</p>
         </div>
@@ -46,21 +52,20 @@
       </fieldset>
 
       <fieldset>
-        <legend>Local bridge</legend>
-        <div class="row">
-          <label class="narrow">Port <input name="bridgePort" type="number" min="1" max="65535" value="8022" required /></label>
-          <label class="grow">Token <input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
-        </div>
+        <legend>Relay</legend>
+        <label>Relay address <input name="bridge" required spellcheck="false" autocapitalize="off" autocorrect="off" inputmode="url" placeholder="wss://…trycloudflare.com" /></label>
+        <label>Token <input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
         <details>
-          <summary>How do I start the bridge?</summary>
-          <p>Browsers can't open SSH connections directly, so a tiny relay runs on your own computer (it only listens on 127.0.0.1). Download <a href="bridge.py" download>bridge.py</a> and run:</p>
-          <pre>python3 bridge.py</pre>
-          <p>It prints a link that fills in the port and token for you. Restrict targets with <code>--allow host:22</code>.</p>
-          <p class="small muted">Chrome may ask to allow access to devices on your local network. Safari blocks connections from https pages to localhost; use Chrome or Firefox.</p>
+          <summary>How do I set up the relay?</summary>
+          <p>Browsers (Safari included) can't open SSH connections themselves, so a tiny relay runs on the computer you want to reach. Nothing gets installed on this device. On that computer, download <a href="bridge.py" download>bridge.py</a> and run:</p>
+          <pre>python3 bridge.py --tunnel</pre>
+          <p>That uses a free <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" rel="noopener noreferrer" target="_blank">cloudflared</a> tunnel, so there's no domain or router setup. Have a domain and certificate? Use <code>--tls-cert</code>/<code>--tls-key</code>/<code>--public-url</code> instead.</p>
+          <p>It prints a link that fills in the relay address and token. Send that link to this device, open it, tick "Remember" below and bookmark the page or add it to the Home Screen.</p>
+          <p class="small muted">By default the relay only connects to that computer's own SSH server (localhost:22). Widen it with <code>--allow host:22</code>.</p>
         </details>
       </fieldset>
 
-      <label class="check"><input type="checkbox" name="remember" /> Remember host, port and username on this device (never passwords or keys)</label>
+      <label class="check"><input type="checkbox" name="remember" /> Remember everything except password and key on this device</label>
 
       <div class="actions">
         <button class="btn btn--primary" type="submit">Connect</button>
@@ -76,6 +81,21 @@
       <button class="btn btn--ghost" type="button" id="disconnect">Disconnect</button>
     </header>
     <div id="terminal" class="terminal"></div>
+    <div id="keybar" class="keybar" role="toolbar" aria-label="Extra keys">
+      <button type="button" data-key="esc">Esc</button>
+      <button type="button" data-key="tab">Tab</button>
+      <button type="button" data-key="ctrl" aria-pressed="false">Ctrl</button>
+      <button type="button" data-key="alt" aria-pressed="false">Alt</button>
+      <button type="button" data-key="left" aria-label="Left">←</button>
+      <button type="button" data-key="up" aria-label="Up">↑</button>
+      <button type="button" data-key="down" aria-label="Down">↓</button>
+      <button type="button" data-key="right" aria-label="Right">→</button>
+      <button type="button" data-text="|">|</button>
+      <button type="button" data-text="~">~</button>
+      <button type="button" data-text="/">/</button>
+      <button type="button" data-text="-">-</button>
+      <button type="button" data-key="paste">Paste</button>
+    </div>
   </section>
 
   <dialog id="dialog">
