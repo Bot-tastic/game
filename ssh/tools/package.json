@@ -1,0 +1,15 @@
+{
+  "name": "ssh-vendor-build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@microsoft/dev-tunnels-ssh": "3.12.42",
+    "@microsoft/dev-tunnels-ssh-keys": "3.12.42",
+    "@xterm/xterm": "6.0.0",
+    "@xterm/addon-fit": "0.11.0",
+    "esbuild": "0.28.2"
+  }
+}

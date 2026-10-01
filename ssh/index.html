@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="SSH" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>SSH</title>
+  <link rel="stylesheet" href="../shared/theme.css" />
+  <link rel="stylesheet" href="../shared/components.css" />
+  <link rel="stylesheet" href="vendor/xterm.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main id="setup" class="setup">
+    <h1>SSH</h1>
+    <p class="muted">Encryption and login happen in this tab. The relay only passes encrypted bytes along; nothing is sent to GitHub.</p>
+
+    <form id="connect-form" autocomplete="off">
+      <fieldset>
+        <legend>Server</legend>
+        <div class="row">
+          <label class="grow">Host <input name="host" required spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="myserver.example.com" /></label>
+          <label class="narrow">Port <input name="port" type="number" inputmode="numeric" min="1" max="65535" value="22" required /></label>
+        </div>
+        <p class="muted small">As seen from the relay: the server's public address with the Cloudflare Worker, or <code>localhost</code> when bridge.py runs on the server itself.</p>
+        <label>Username <input name="username" required spellcheck="false" autocapitalize="off" autocorrect="off" /></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Login</legend>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="auth" value="password" checked /> Password</label>
+          <label><input type="radio" name="auth" value="key" /> Private key</label>
+          <label><input type="radio" name="auth" value="interactive" /> Prompts / 2FA</label>
+        </div>
+        <label data-auth="password">Password <input name="password" type="password" autocomplete="off" /></label>
+        <div data-auth="key" hidden>
+          <label>Key file <input name="keyfile" type="file" /></label>
+          <label>…or paste key <textarea name="keytext" rows="4" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="-----BEGIN ENCRYPTED PRIVATE KEY-----"></textarea></label>
+          <label>Passphrase <input name="passphrase" type="password" autocomplete="off" /></label>
+          <p class="muted small">RSA or ECDSA keys in PKCS#8 format (passphrase-protected is fine). Convert a copy of an existing key with <code>ssh-keygen -p -m PKCS8 -f copy_of_key</code>. Ed25519 keys are not supported.</p>
+        </div>
+        <p data-auth="interactive" class="muted small" hidden>The server's questions (password, one-time code…) will be asked one by one.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Relay</legend>
+        <label>Relay address <input name="bridge" required spellcheck="false" autocapitalize="off" autocorrect="off" inputmode="url" placeholder="https://ssh-relay.you.workers.dev" /></label>
+        <label>Token <input name="token" type="password" required autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" /></label>
+        <details>
+          <summary>How do I set up the relay?</summary>
+          <p>Browsers (Safari included) can't open SSH connections themselves, so the encrypted SSH traffic goes through a small relay. It never sees your password, key or session. Pick one:</p>
+          <h3>A. Cloudflare Worker (nothing to run anywhere)</h3>
+          <p class="small muted">Needs your SSH server reachable from the internet. Doable entirely from Safari.</p>
+          <ol>
+            <li>Tap <button type="button" class="btn btn--ghost inline-btn" id="gen-token">Generate token</button>. It fills in the Token field and copies it.</li>
+            <li>In the <a href="https://dash.cloudflare.com/" rel="noopener noreferrer" target="_blank">Cloudflare dashboard</a> (free account): Workers &amp; Pages → Create → Worker → name it, Deploy → Edit code. Replace everything with <a href="worker/worker.js" target="_blank">worker.js</a> and Deploy.</li>
+            <li>Worker → Settings → Variables and Secrets: add a <b>Secret</b> <code>TOKEN</code> (paste the token) and a text variable <code>ALLOW</code> with your server, e.g. <code>myserver.example.com:22</code>.</li>
+            <li>Put the Worker's address (<code>https://….workers.dev</code>) in Relay address, tick "Remember", connect.</li>
+          </ol>
+          <h3>B. bridge.py on the server</h3>
+          <p class="small muted">Works even if the server isn't reachable from the internet.</p>
+          <p>On that computer, download <a href="bridge.py" download>bridge.py</a> and run <code>python3 bridge.py --tunnel</code> (uses a free <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" rel="noopener noreferrer" target="_blank">cloudflared</a> tunnel). It prints a link that fills in the address and token. It only reaches that computer's own SSH (localhost:22) unless you add <code>--allow host:22</code>.</p>
+        </details>
+      </fieldset>
+
+      <label class="check"><input type="checkbox" name="remember" /> Remember everything except password and key on this device</label>
+
+      <div class="actions">
+        <button class="btn btn--primary" type="submit">Connect</button>
+        <button class="btn btn--ghost" type="button" id="known-hosts-btn">Known hosts</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </form>
+  </main>
+
+  <section id="session" class="session" hidden>
+    <header class="bar">
+      <span id="session-title" class="title"></span>
+      <button class="btn btn--ghost" type="button" id="disconnect">Disconnect</button>
+    </header>
+    <div id="terminal" class="terminal"></div>
+    <div id="keybar" class="keybar" role="toolbar" aria-label="Extra keys">
+      <button type="button" data-key="esc">Esc</button>
+      <button type="button" data-key="tab">Tab</button>
+      <button type="button" data-key="ctrl" aria-pressed="false">Ctrl</button>
+      <button type="button" data-key="alt" aria-pressed="false">Alt</button>
+      <button type="button" data-key="left" aria-label="Left">←</button>
+      <button type="button" data-key="up" aria-label="Up">↑</button>
+      <button type="button" data-key="down" aria-label="Down">↓</button>
+      <button type="button" data-key="right" aria-label="Right">→</button>
+      <button type="button" data-text="|">|</button>
+      <button type="button" data-text="~">~</button>
+      <button type="button" data-text="/">/</button>
+      <button type="button" data-text="-">-</button>
+      <button type="button" data-key="paste">Paste</button>
+    </div>
+  </section>
+
+  <dialog id="dialog">
+    <form method="dialog" id="dialog-form">
+      <h2 id="dialog-title"></h2>
+      <div id="dialog-body"></div>
+      <div class="actions" id="dialog-actions"></div>
+    </form>
+  </dialog>
+</body>
+</html>
