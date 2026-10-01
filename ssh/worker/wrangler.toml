@@ -1,0 +1,8 @@
+# Optional: deploy from a computer with `npx wrangler deploy` instead of the dashboard.
+# Then set the secret with `npx wrangler secret put TOKEN` and ALLOW below.
+name = "ssh-relay"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+ALLOW = "myserver.example.com:22"

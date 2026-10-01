@@ -27,10 +27,10 @@
       <fieldset>
         <legend>Server</legend>
         <div class="row">
-          <label class="grow">Host <input name="host" required spellcheck="false" autocapitalize="off" autocorrect="off" value="localhost" /></label>
+          <label class="grow">Host <input name="host" required spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="myserver.example.com" /></label>
           <label class="narrow">Port <input name="port" type="number" inputmode="numeric" min="1" max="65535" value="22" required /></label>
         </div>
-        <p class="muted small">As seen from the relay. If the relay runs on the server itself, keep <code>localhost</code>.</p>
+        <p class="muted small">As seen from the relay: the server's public address with the Cloudflare Worker, or <code>localhost</code> when bridge.py runs on the server itself.</p>
         <label>Username <input name="username" required spellcheck="false" autocapitalize="off" autocorrect="off" /></label>
       </fieldset>
 
@@ -53,15 +53,22 @@
 
       <fieldset>
         <legend>Relay</legend>
-        <label>Relay address <input name="bridge" required spellcheck="false" autocapitalize="off" autocorrect="off" inputmode="url" placeholder="wss://…trycloudflare.com" /></label>
-        <label>Token <input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
+        <label>Relay address <input name="bridge" required spellcheck="false" autocapitalize="off" autocorrect="off" inputmode="url" placeholder="https://ssh-relay.you.workers.dev" /></label>
+        <label>Token <input name="token" type="password" required autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" /></label>
         <details>
           <summary>How do I set up the relay?</summary>
-          <p>Browsers (Safari included) can't open SSH connections themselves, so a tiny relay runs on the computer you want to reach. Nothing gets installed on this device. On that computer, download <a href="bridge.py" download>bridge.py</a> and run:</p>
-          <pre>python3 bridge.py --tunnel</pre>
-          <p>That uses a free <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" rel="noopener noreferrer" target="_blank">cloudflared</a> tunnel, so there's no domain or router setup. Have a domain and certificate? Use <code>--tls-cert</code>/<code>--tls-key</code>/<code>--public-url</code> instead.</p>
-          <p>It prints a link that fills in the relay address and token. Send that link to this device, open it, tick "Remember" below and bookmark the page or add it to the Home Screen.</p>
-          <p class="small muted">By default the relay only connects to that computer's own SSH server (localhost:22). Widen it with <code>--allow host:22</code>.</p>
+          <p>Browsers (Safari included) can't open SSH connections themselves, so the encrypted SSH traffic goes through a small relay. It never sees your password, key or session. Pick one:</p>
+          <h3>A. Cloudflare Worker (nothing to run anywhere)</h3>
+          <p class="small muted">Needs your SSH server reachable from the internet. Doable entirely from Safari.</p>
+          <ol>
+            <li>Tap <button type="button" class="btn btn--ghost inline-btn" id="gen-token">Generate token</button>. It fills in the Token field and copies it.</li>
+            <li>In the <a href="https://dash.cloudflare.com/" rel="noopener noreferrer" target="_blank">Cloudflare dashboard</a> (free account): Workers &amp; Pages → Create → Worker → name it, Deploy → Edit code. Replace everything with <a href="worker/worker.js" target="_blank">worker.js</a> and Deploy.</li>
+            <li>Worker → Settings → Variables and Secrets: add a <b>Secret</b> <code>TOKEN</code> (paste the token) and a text variable <code>ALLOW</code> with your server, e.g. <code>myserver.example.com:22</code>.</li>
+            <li>Put the Worker's address (<code>https://….workers.dev</code>) in Relay address, tick "Remember", connect.</li>
+          </ol>
+          <h3>B. bridge.py on the server</h3>
+          <p class="small muted">Works even if the server isn't reachable from the internet.</p>
+          <p>On that computer, download <a href="bridge.py" download>bridge.py</a> and run <code>python3 bridge.py --tunnel</code> (uses a free <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" rel="noopener noreferrer" target="_blank">cloudflared</a> tunnel). It prints a link that fills in the address and token. It only reaches that computer's own SSH (localhost:22) unless you add <code>--allow host:22</code>.</p>
         </details>
       </fieldset>
 

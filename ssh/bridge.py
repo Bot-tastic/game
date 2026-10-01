@@ -94,8 +94,11 @@ class Bridge:
             return await reject(writer, 400, "WebSocket upgrade required")
 
         query = parse_qs(urlsplit(parts[1]).query)
-        token = query.get("token", [""])[0]
-        if not hmac.compare_digest(token.encode(), self.token.encode()):
+        # The page sends the token as a WebSocket subprotocol ("token.<value>") so it
+        # stays out of URLs and proxy logs.
+        offered = [p.strip() for p in headers.get("sec-websocket-protocol", "").split(",")]
+        token = next((p[len("token."):] for p in offered if p.startswith("token.")), "")
+        if "ssh-relay" not in offered or not hmac.compare_digest(token.encode(), self.token.encode()):
             log("rejected connection with a wrong token")
             await asyncio.sleep(1)
             return await reject(writer, 401, "Bad token")
@@ -124,7 +127,8 @@ class Bridge:
             (
                 "HTTP/1.1 101 Switching Protocols\r\n"
                 "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-                f"Sec-WebSocket-Accept: {accept}\r\n\r\n"
+                f"Sec-WebSocket-Accept: {accept}\r\n"
+                "Sec-WebSocket-Protocol: ssh-relay\r\n\r\n"
             ).encode()
         )
         await writer.drain()

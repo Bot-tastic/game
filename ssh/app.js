@@ -93,6 +93,7 @@ function init() {
   });
   $('#disconnect').addEventListener('click', () => disconnect('Disconnected.'));
   $('#known-hosts-btn').addEventListener('click', showKnownHosts);
+  $('#gen-token').addEventListener('click', generateToken);
   window.addEventListener('pagehide', () => disconnect());
   setupKeybar();
   setupViewport();
@@ -112,6 +113,7 @@ async function connect() {
   const token = form.token.value.trim();
   const mode = form.auth.value;
   const relay = parseRelay(bridge);
+  if (!/^[A-Za-z0-9_.~-]+$/.test(token)) throw new Error('The token may only contain letters, digits and - _ . ~');
 
   if (form.remember.checked) {
     writeJson(PROFILE_KEY, { host, port, username, bridge, token });
@@ -151,8 +153,9 @@ async function connect() {
   const conn = { closed: false };
   active = conn;
   try {
-    relay.search = new URLSearchParams({ token, host, port: String(port) }).toString();
-    conn.ws = await openWebSocket(relay.href);
+    relay.search = new URLSearchParams({ host, port: String(port) }).toString();
+    // The token rides in the subprotocol header so it never appears in URLs or logs.
+    conn.ws = await openWebSocket(relay.href, ['ssh-relay', `token.${token}`]);
 
     const config = new ssh.SshSessionConfiguration();
     conn.session = new ssh.SshClientSession(config);
@@ -333,6 +336,18 @@ function disconnect(message) {
   if (message) setStatus(message);
 }
 
+function generateToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  form.token.value = token;
+  form.token.type = 'text';
+  setStatus('New token is in the Token field. Use it as the Worker\'s TOKEN secret.');
+  navigator.clipboard?.writeText(token).then(
+    () => setStatus('New token copied. Paste it as the Worker\'s TOKEN secret.'),
+    () => {}
+  );
+}
+
 function parseRelay(value) {
   let url;
   try {
@@ -350,11 +365,11 @@ function parseRelay(value) {
   return url;
 }
 
-function openWebSocket(url) {
+function openWebSocket(url, protocols) {
   return new Promise((resolve, reject) => {
     let ws;
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(url, protocols);
     } catch (err) {
       reject(new Error(`Could not open the bridge connection: ${err.message}`));
       return;
@@ -367,8 +382,8 @@ function openWebSocket(url) {
     ws.onerror = () => {
       const local = url.startsWith('ws:');
       reject(new Error(
-        'Could not reach the relay. Is bridge.py (and its tunnel) still running, and are the address and token right? ' +
-        'It also refuses SSH targets outside its --allow list (default: localhost:22).' +
+        'Could not reach the relay. Check the relay address and token, and that this server is on the relay\'s ' +
+        'allow list (Worker: ALLOW variable; bridge.py: --allow, default localhost:22). With bridge.py, is it still running?' +
         (local ? ' Safari cannot use a ws:// relay on this device; use the wss:// address instead.' : '')
       ));
     };
