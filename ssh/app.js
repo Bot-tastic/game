@@ -81,6 +81,7 @@ function init() {
     form.bridge.value = /^\d+$/.test(b) ? `ws://127.0.0.1:${b}` : b;
   }
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  if (!form.bridge.value) offerBuiltInRelay();
 
   form.addEventListener('change', (e) => {
     if (e.target.name === 'auth') syncAuthFields();
@@ -346,6 +347,17 @@ function generateToken() {
     () => setStatus('New token copied. Paste it as the Worker\'s TOKEN secret.'),
     () => {}
   );
+}
+
+// When the hub runs on Cloudflare Workers, the same Worker serves a relay at ./relay.
+async function offerBuiltInRelay() {
+  try {
+    const res = await fetch('relay', { cache: 'no-store' });
+    const state = res.headers.get('X-SSH-Relay');
+    if (!state || form.bridge.value) return;
+    form.bridge.value = new URL('relay', location.href).href.replace(/^http/, 'ws');
+    if (state !== 'ready') setStatus('This site has a built-in relay, but its TOKEN and ALLOW settings are not set yet.');
+  } catch {}
 }
 
 function parseRelay(value) {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
   <meta name="referrer" content="no-referrer" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,6 +58,7 @@
         <details>
           <summary>How do I set up the relay?</summary>
           <p>Browsers (Safari included) can't open SSH connections themselves, so the encrypted SSH traffic goes through a small relay. It never sees your password, key or session. Pick one:</p>
+          <p class="small muted">If this site itself runs on Cloudflare Workers, its relay is built in at <code>/ssh/relay</code> and is filled in for you: set the Worker's <code>TOKEN</code> secret and <code>ALLOW</code> variable as in step 3 below and enter the same token here.</p>
           <h3>A. Cloudflare Worker (nothing to run anywhere)</h3>
           <p class="small muted">Needs your SSH server reachable from the internet. Doable entirely from Safari.</p>
           <ol>

@@ -1,4 +1,4 @@
-// Cloudflare Worker relay for the web SSH client (bot-tastic.github.io/game/ssh).
+// Cloudflare Worker relay for the web SSH client (the hub's /ssh page).
 //
 // Browsers can't open TCP connections, so the SSH page sends its (already
 // encrypted) SSH traffic over a WebSocket to this Worker, which forwards it to
@@ -9,11 +9,13 @@
 //   TOKEN   (secret, required)  long random string; the page must present it
 //   ALLOW   (required)          comma-separated SSH targets the page may reach,
 //                               e.g. "myserver.example.com:22, 203.0.113.7:2222"
-//   ORIGIN  (optional)          page origin allowed to connect
+//   ORIGIN  (optional)          page origin(s) allowed to connect, comma-separated
 //                               (default https://bot-tastic.github.io)
 //
 // The file has no dependencies, so it can be pasted straight into the
-// Cloudflare dashboard's editor (works from Safari on an iPad).
+// Cloudflare dashboard's editor (works from Safari on an iPad). When the whole
+// hub runs on Workers (wrangler.jsonc at the repo root), worker/index.js serves
+// this relay at /ssh/relay and no separate Worker is needed.
 
 import { connect } from 'cloudflare:sockets';
 
@@ -23,12 +25,17 @@ const TOKEN_PREFIX = 'token.';
 
 export default {
   async fetch(request, env) {
+    const configured = Boolean(env.TOKEN && env.TOKEN.length >= 32 && env.ALLOW);
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-      return new Response('SSH relay. Open the SSH page and use this address as the relay.\n', { status: 426 });
+      // The SSH page probes this header to offer a relay on its own origin.
+      return new Response('SSH relay. Open the SSH page and use this address as the relay.\n', {
+        headers: { 'X-SSH-Relay': configured ? 'ready' : 'not-configured' },
+      });
     }
 
     const origin = request.headers.get('Origin') || '';
-    if (origin !== (env.ORIGIN || DEFAULT_ORIGIN)) {
+    const origins = (env.ORIGIN || DEFAULT_ORIGIN).split(',').map((s) => s.trim().replace(/\/+$/, ''));
+    if (!origins.includes(origin)) {
       return new Response('Origin not allowed', { status: 403 });
     }
 

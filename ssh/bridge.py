@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WebSocket -> TCP relay for the web SSH client (bot-tastic.github.io/game/ssh).
+"""WebSocket -> TCP relay for the web SSH client (the Game Hub's /ssh page).
 
 Browsers (including Safari on iPad) cannot open raw TCP connections, so the SSH
 page talks to this relay over a WebSocket and the relay forwards the bytes to
@@ -21,6 +21,10 @@ it). Nothing needs to be installed on the iPad.
 
   Same computer as the browser (desktop Chrome/Firefox only, not Safari):
       python3 bridge.py --allow-any
+
+  If the hub is hosted somewhere other than bot-tastic.github.io/game (e.g. on
+  Cloudflare Workers), pass its SSH page with --page-url or set WEB_SSH_PAGE_URL:
+      python3 bridge.py --tunnel --page-url https://game-hub.you.workers.dev/ssh/
 
 Safety rails:
   * only accepts WebSocket connections from the SSH page's origin
@@ -48,8 +52,7 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-PAGE_ORIGIN = "https://bot-tastic.github.io"
-PAGE_URL = PAGE_ORIGIN + "/game/ssh/"
+DEFAULT_PAGE_URL = "https://bot-tastic.github.io/game/ssh/"
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 TOKEN_FILE = Path.home() / ".config" / "web-ssh-bridge" / "token"
 MAX_FRAME = 1 << 20
@@ -233,14 +236,14 @@ def load_token(rotate):
     return token
 
 
-def page_link(bridge_url, token):
-    return f"{PAGE_URL}#bridge={quote(bridge_url, safe='')}&token={token}"
+def page_link(page_url, bridge_url, token):
+    return f"{page_url}#bridge={quote(bridge_url, safe='')}&token={token}"
 
 
-def print_link(bridge_url, token):
+def print_link(page_url, bridge_url, token):
     print("\nOpen this link in Safari (bookmark it or add it to the Home Screen).")
-    print("The part after # never leaves your device; GitHub doesn't see it.\n")
-    print(f"  {page_link(bridge_url, token)}\n", flush=True)
+    print("The part after # never leaves your device; the web host doesn't see it.\n")
+    print(f"  {page_link(page_url, bridge_url, token)}\n", flush=True)
 
 
 async def start_tunnel(port):
@@ -288,6 +291,8 @@ def main():
                     help="SSH target the page may reach (repeatable; default localhost:22)")
     ap.add_argument("--allow-any", action="store_true", help="let the page reach any SSH target")
     ap.add_argument("--new-token", action="store_true", help="generate a new token (old links stop working)")
+    ap.add_argument("--page-url", default=os.environ.get("WEB_SSH_PAGE_URL", DEFAULT_PAGE_URL),
+                    help="address of the SSH page (default $WEB_SSH_PAGE_URL or %(default)s)")
     ap.add_argument("--origin", action="append", default=[], help=argparse.SUPPRESS)
     args = ap.parse_args()
 
@@ -301,7 +306,10 @@ def main():
         sys.exit("Refusing to listen on a network interface without TLS. Use --tunnel, or --tls-cert/--tls-key.")
 
     token = load_token(args.new_token)
-    origins = {PAGE_ORIGIN, *args.origin}
+    page = urlsplit(args.page_url)
+    if page.scheme not in ("https", "http") or not page.netloc:
+        sys.exit("--page-url must be the SSH page's https:// address")
+    origins = {f"{page.scheme}://{page.netloc}", *args.origin}
     if args.allow_any:
         allow = None
     else:
@@ -320,7 +328,7 @@ def main():
             print("Note: quick-tunnel addresses change every time cloudflared restarts.")
         else:
             url = args.public_url or f"{scheme}://{'127.0.0.1' if is_loopback(args.listen) else args.listen}:{args.port}"
-        print_link(url, token)
+        print_link(args.page_url, url, token)
         try:
             async with server:
                 await server.serve_forever()

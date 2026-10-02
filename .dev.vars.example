@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `npm run dev`. .dev.vars is git-ignored and never served.
+# SSH relay token (32+ characters). The SSH page's "Generate token" button makes one.
+TOKEN=change-me-to-a-long-random-string-of-32-plus-chars
+# SSH servers the relay may reach, comma-separated host[:port].
+ALLOW=localhost:22
+# Optional: page origin(s) allowed to use the relay, comma-separated.
+# Defaults to the Worker's own origin.
+# ORIGIN=https://game-hub.example.workers.dev

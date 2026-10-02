@@ -1,0 +1,33 @@
+// Cloudflare Workers config for the Game Hub.
+//
+// The hub itself is static files served straight from Workers Static Assets.
+// The Worker script only runs for /ssh/relay (the SSH page's WebSocket relay)
+// and for paths with no matching file.
+//
+// No tokens live here. Set them as Worker secrets / env vars instead:
+//   npx wrangler secret put TOKEN    # SSH relay token, 32+ characters
+//   npx wrangler secret put ALLOW    # SSH targets, e.g. "myserver.example.com:22"
+// (or in the dashboard: Worker → Settings → Variables and Secrets).
+// For `wrangler dev`, put them in .dev.vars (see .dev.vars.example).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "game-hub",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  // `node worker/build.mjs` copies the site (index.html, games/, shared/, ssh/)
+  // into dist/ before every `wrangler dev` / `wrangler deploy`.
+  "build": {
+    "command": "node worker/build.mjs",
+    "watch_dir": ["games", "shared", "ssh", "index.html"]
+  },
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none",
+    "run_worker_first": ["/ssh/relay"]
+  },
+  // Keep variables set in the dashboard when deploying from the CLI or CI.
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}
