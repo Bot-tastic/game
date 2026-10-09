@@ -1,0 +1,88 @@
+// Six neon worlds, ten levels each.
+export const THEMES = [
+  {
+    name: "Neon City",
+    sky: ["#03010c", "#160737", "#2d0a4e"],
+    line: "#20f2ff",
+    glow: "32,242,255",
+    fill: "#070414",
+    fill2: "#120a2e",
+    accent: "#ff2bd6",
+    far: "#1a0b3d",
+    near: "#260f55",
+    deco: "city",
+    musicRoot: 57,
+  },
+  {
+    name: "Sunset Drive",
+    sky: ["#12031f", "#5a0f4a", "#ff5a5f"],
+    line: "#ffd166",
+    glow: "255,209,102",
+    fill: "#14051c",
+    fill2: "#2a0c33",
+    accent: "#ff4f8b",
+    far: "#3d0f45",
+    near: "#260832",
+    deco: "sun",
+    musicRoot: 55,
+  },
+  {
+    name: "Toxic Zone",
+    sky: ["#010804", "#05200f", "#0c3a14"],
+    line: "#7cff4f",
+    glow: "124,255,79",
+    fill: "#020a05",
+    fill2: "#08200d",
+    accent: "#e7ff3a",
+    far: "#0a2a12",
+    near: "#0d3a18",
+    deco: "grid",
+    musicRoot: 52,
+  },
+  {
+    name: "Frost Peak",
+    sky: ["#020615", "#0a1d45", "#1b4a7a"],
+    line: "#c6f2ff",
+    glow: "198,242,255",
+    fill: "#040b1c",
+    fill2: "#0c1d3a",
+    accent: "#6fa8ff",
+    far: "#14305a",
+    near: "#0d2246",
+    deco: "snow",
+    musicRoot: 59,
+  },
+  {
+    name: "Inferno",
+    sky: ["#0c0100", "#3a0700", "#7a1a00"],
+    line: "#ff6a1f",
+    glow: "255,106,31",
+    fill: "#0e0200",
+    fill2: "#2a0700",
+    accent: "#ffd23f",
+    far: "#3a0a02",
+    near: "#260500",
+    deco: "embers",
+    musicRoot: 50,
+  },
+  {
+    name: "Synthwave",
+    sky: ["#06001a", "#2a0057", "#ff2fa0"],
+    line: "#ff3cf0",
+    glow: "255,60,240",
+    fill: "#08001a",
+    fill2: "#1c0040",
+    accent: "#3cf7ff",
+    far: "#2b0060",
+    near: "#18003a",
+    deco: "synth",
+    musicRoot: 54,
+  },
+];
+
+export const LEVELS_PER_WORLD = 10;
+export const LEVEL_COUNT = THEMES.length * LEVELS_PER_WORLD;
+
+export function themeForLevel(n) {
+  return THEMES[Math.min(THEMES.length - 1, Math.floor((n - 1) / LEVELS_PER_WORLD))];
+}

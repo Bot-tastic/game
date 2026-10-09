@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#05010f" />
+  <title>Rider</title>
+  <link rel="stylesheet" href="../../shared/theme.css" />
+  <link rel="stylesheet" href="../../shared/components.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="game-page">
+  <canvas id="game" aria-label="Rider game canvas"></canvas>
+
+  <!-- In-game HUD -->
+  <div id="hud" class="r-hud safe-area" hidden>
+    <button id="btn-pause" class="r-icon" aria-label="Pause">❚❚</button>
+    <div class="r-hud-center">
+      <div id="hud-level" class="r-hud-title">LEVEL 1</div>
+      <div id="hud-progress-wrap" class="r-progress"><div id="hud-progress"></div><span id="hud-cp-marks"></span></div>
+      <div id="hud-score" class="r-score">0</div>
+      <div id="hud-combo" class="r-combo"></div>
+    </div>
+    <div class="r-hud-right">
+      <div class="r-pill">💎 <span id="hud-gems">0</span></div>
+      <div class="r-pill" id="hud-flips">↻ 0/1</div>
+    </div>
+  </div>
+  <div id="tap" class="r-tap" hidden>TAP TO RIDE</div>
+  <div id="hint" class="r-hint" hidden><b>HOLD</b> to flip · <b>RELEASE</b> to land flat</div>
+
+  <!-- Main menu (attract-mode demo runs behind it) -->
+  <section id="scr-menu" class="r-screen safe-area">
+    <div class="r-topbar">
+      <a class="hud-back" href="../../index.html">‹ Hub</a>
+      <div class="r-pill r-wallet">💎 <span id="menu-gems">0</span></div>
+    </div>
+    <div class="r-menu-body">
+      <h1 class="r-logo">RIDER</h1>
+      <p class="r-tag">Hold to flip. Land it clean.</p>
+      <div class="r-menu-btns">
+        <button class="btn btn--primary r-big" id="btn-levels">▶ Levels</button>
+        <button class="btn r-big r-endless" id="btn-endless">∞ Endless</button>
+        <div class="r-row">
+          <button class="btn" id="btn-garage">🏍 Garage</button>
+          <button class="btn" id="btn-settings">⚙ Settings</button>
+        </div>
+        <button class="btn r-gift" id="btn-gift">🎁 <span id="gift-label">Gift</span></button>
+      </div>
+      <p class="r-menu-meta">★ <span id="menu-stars">0</span>/<span id="menu-stars-max">180</span> · Best endless <span id="menu-best">0</span></p>
+    </div>
+  </section>
+
+  <!-- Level select -->
+  <section id="scr-levels" class="r-screen r-panel safe-area" hidden>
+    <div class="r-topbar">
+      <button class="hud-back" id="levels-back">‹ Menu</button>
+      <div class="r-pill" id="world-stars">★ 0/30</div>
+    </div>
+    <div class="r-world-head">
+      <button class="r-icon" id="world-prev" aria-label="Previous world">‹</button>
+      <h2 id="world-name">World 1</h2>
+      <button class="r-icon" id="world-next" aria-label="Next world">›</button>
+    </div>
+    <div id="level-grid" class="r-level-grid"></div>
+    <p class="r-note">★ finish · ★ hit the flip target · ★ no crashes</p>
+  </section>
+
+  <!-- Garage -->
+  <section id="scr-garage" class="r-screen r-panel safe-area" hidden>
+    <div class="r-topbar">
+      <button class="hud-back" id="garage-back">‹ Menu</button>
+      <div class="r-pill">💎 <span id="garage-gems">0</span></div>
+    </div>
+    <canvas id="garage-preview"></canvas>
+    <div class="r-garage-info">
+      <h2 id="garage-name">Neon</h2>
+      <p id="garage-info"></p>
+      <button class="btn btn--primary" id="garage-action">Selected</button>
+    </div>
+    <div id="garage-grid" class="r-bike-grid"></div>
+  </section>
+
+  <!-- Settings -->
+  <section id="scr-settings" class="r-screen r-panel safe-area" hidden>
+    <div class="r-topbar">
+      <button class="hud-back" id="settings-back">‹ Menu</button>
+    </div>
+    <h2 class="r-panel-title">Settings</h2>
+    <div class="r-settings">
+      <div class="r-set"><span>Sound effects</span><button class="r-toggle" id="set-sfx">ON</button></div>
+      <div class="r-set"><span>Music</span><button class="r-toggle" id="set-music">ON</button></div>
+      <div class="r-set"><span>Vibration</span><button class="r-toggle" id="set-vibe">ON</button></div>
+    </div>
+    <h2 class="r-panel-title">Stats</h2>
+    <ul id="stats" class="r-stats"></ul>
+    <p class="r-note">Controls: hold the screen, Space, W or ↑ to flip. P / Esc pauses, R restarts a level.</p>
+    <button class="btn btn--ghost" id="set-reset">Reset progress</button>
+  </section>
+
+  <!-- Overlays -->
+  <div id="ov-pause" class="overlay r-ov" hidden>
+    <h2>Paused</h2>
+    <p class="stat" id="pause-info"></p>
+    <div class="actions r-col">
+      <button class="btn btn--primary" id="pause-resume">Resume</button>
+      <button class="btn" id="pause-restart">Restart</button>
+      <button class="btn btn--ghost" id="pause-menu">Menu</button>
+    </div>
+  </div>
+
+  <div id="ov-complete" class="overlay r-ov" hidden>
+    <h2 id="cmp-title">LEVEL COMPLETE</h2>
+    <div id="cmp-stars" class="r-stars"></div>
+    <ul id="cmp-req" class="r-req"></ul>
+    <p class="stat">Trick score <strong id="cmp-score">0</strong></p>
+    <p class="stat">Gems <strong id="cmp-gems">0</strong></p>
+    <div class="actions">
+      <button class="btn btn--primary" id="btn-next">Next ▶</button>
+      <button class="btn" id="btn-retry">Retry</button>
+      <button class="btn btn--ghost" id="cmp-menu">Levels</button>
+    </div>
+  </div>
+
+  <div id="ov-over" class="overlay r-ov" hidden>
+    <h2>CRASHED!</h2>
+    <p class="stat">Score <strong id="over-score">0</strong></p>
+    <p class="r-newbest" id="over-new" hidden>NEW BEST!</p>
+    <p class="stat">Best <strong id="over-best">0</strong></p>
+    <p class="stat">Distance <strong id="over-dist">0</strong> · Flips <strong id="over-flips">0</strong> · 💎 <strong id="over-gems">0</strong></p>
+    <div class="actions r-col">
+      <button class="btn btn--primary" id="btn-revive">Revive 💎 30</button>
+      <button class="btn" id="over-retry">Ride again</button>
+      <button class="btn btn--ghost" id="over-menu">Menu</button>
+    </div>
+  </div>
+
+  <div id="ov-confirm" class="overlay r-ov" hidden>
+    <h2>Reset all progress?</h2>
+    <p class="stat">Levels, stars, gems and bikes will be lost.</p>
+    <div class="actions">
+      <button class="btn" id="confirm-no">Cancel</button>
+      <button class="btn btn--primary r-danger" id="confirm-yes">Reset</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
